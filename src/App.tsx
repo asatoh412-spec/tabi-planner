@@ -1,25 +1,43 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import AreaPicker from './components/AreaPicker'
+import ConditionsForm, { type StartRequest } from './components/ConditionsForm'
+import Generating from './components/Generating'
 import Settings from './components/Settings'
-import { listTrips, purgeExpiredGoogleCoords } from './db'
-import type { Trip } from './types'
+import TravelView from './components/TravelView'
+import TripView from './components/TripView'
+import { deleteTrip, listTrips, purgeExpiredGoogleCoords } from './db'
+import { fmtDate } from './lib/time'
+import type { Conditions, Trip } from './types'
 
-type Tab = 'trips' | 'area' | 'settings'
+type View =
+  | { k: 'trips' } | { k: 'area' } | { k: 'settings' } | { k: 'travel' }
+  | { k: 'new'; initial?: { name: string; conditions: Conditions } }
+  | { k: 'gen'; req: StartRequest } | { k: 'trip'; id: string }
 
-function Trips({ go }: { go: (t: Tab) => void }) {
+function Trips({ open, create }: { open: (id: string) => void; create: () => void }) {
   const [trips, setTrips] = useState<Trip[]>([])
-  useEffect(() => { listTrips().then(setTrips) }, [])
+  useEffect(() => { listTrips().then(t => setTrips(t.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))) }, [])
   return (
     <section className="page">
       <h1>旅行一覧</h1>
-      {trips.length === 0 && <p className="note">まだ旅行はありません。プランの作成は段階1で追加します。まずは「範囲」で行き先の範囲を保存し、「設定」でAPIキーの接続テストをしてください。</p>}
-      <div className="row"><button onClick={() => go('area')}>範囲を指定する</button><button onClick={() => go('settings')}>設定を開く</button></div>
+      <button className="primary" onClick={create}>新しい旅行</button>
+      {trips.length === 0 && <p className="note">まだ旅行はありません。先に「範囲」で行き先の範囲を保存し、「設定」でAPIキーを入れてください。</p>}
+      <ul className="list cards">
+        {trips.map(t => {
+          const p = t.plans.find(x => x.id === t.adoptedPlanId) ?? t.plans[0]
+          return <li key={t.id}>
+            <button className="link" onClick={() => open(t.id)}>{t.name}</button>
+            <span className="note">{p ? `${fmtDate(p.days[0].date)}〜 ${t.plans.length}案` : '案なし'}{t.adoptedPlanId ? '・採用済み' : ''}</span>
+            <button className="ghost" onClick={async () => { if (confirm(`「${t.name}」を削除しますか`)) { await deleteTrip(t.id); setTrips(trips.filter(x => x.id !== t.id)) } }}>削除</button>
+          </li>
+        })}
+      </ul>
     </section>
   )
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('trips')
+  const [view, setView] = useState<View>({ k: 'trips' })
   const [online, setOnline] = useState(navigator.onLine)
   useEffect(() => {
     purgeExpiredGoogleCoords()
@@ -27,18 +45,23 @@ export default function App() {
     addEventListener('online', on); addEventListener('offline', off)
     return () => { removeEventListener('online', on); removeEventListener('offline', off) }
   }, [])
+  const onDone = useCallback((id: string) => setView({ k: 'trip', id }), [])
+  const tab = view.k === 'new' || view.k === 'gen' || view.k === 'trip' ? 'trips' : view.k
   return (
     <div className="app">
-      {!online && <div className="offline">オフライン表示中</div>}
+      {!online && <div className="offline">オフライン表示中（保存済みの日程と地図だけ表示します）</div>}
       <main>
-        {tab === 'trips' && <Trips go={setTab} />}
-        {tab === 'area' && <AreaPicker />}
-        {tab === 'settings' && <Settings />}
+        {view.k === 'trips' && <Trips open={id => setView({ k: 'trip', id })} create={() => setView({ k: 'new' })} />}
+        {view.k === 'new' && <ConditionsForm initial={view.initial} onStart={req => setView({ k: 'gen', req })} goArea={() => setView({ k: 'area' })} />}
+        {view.k === 'gen' && <Generating req={view.req} onDone={onDone} onCancel={() => setView({ k: 'new', initial: { name: view.req.name, conditions: view.req.conditions } })} />}
+        {view.k === 'trip' && <TripView tripId={view.id} onBack={() => setView({ k: 'trips' })} onRegenerate={(c, name) => setView({ k: 'new', initial: { name, conditions: c } })} />}
+        {view.k === 'area' && <AreaPicker />}
+        {view.k === 'travel' && <TravelView />}
+        {view.k === 'settings' && <Settings />}
       </main>
       <nav className="tabs">
-        <button className={tab === 'trips' ? 'on' : ''} onClick={() => setTab('trips')}>旅行</button>
-        <button className={tab === 'area' ? 'on' : ''} onClick={() => setTab('area')}>範囲</button>
-        <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>設定</button>
+        {([['trips', '旅行'], ['travel', '旅行中'], ['area', '範囲'], ['settings', '設定']] as const).map(([k, l]) =>
+          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setView({ k } as View)}>{l}</button>)}
       </nav>
     </div>
   )

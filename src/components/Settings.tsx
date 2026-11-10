@@ -45,6 +45,7 @@ export default function Settings() {
       <label>Google Maps Platform APIキー<input type="password" value={s.googleKey} onChange={set('googleKey')} autoComplete="off" /></label>
       <label>Claude APIキー<input type="password" value={s.anthropicKey} onChange={set('anthropicKey')} autoComplete="off" /></label>
       <label>Claudeのモデル<input value={s.claudeModel} onChange={set('claudeModel')} /></label>
+      <label>組み直しの上限回数<input type="number" min={0} max={5} value={s.maxRepair} onChange={e => { setS({ ...s, maxRepair: Number(e.target.value) }); setSaved(false) }} /></label>
       <label>楽天 アプリID<input value={s.rakutenAppId} onChange={set('rakutenAppId')} autoComplete="off" /></label>
       <label>楽天 アクセスキー<input type="password" value={s.rakutenAccessKey} onChange={set('rakutenAccessKey')} autoComplete="off" /></label>
       <div className="row">

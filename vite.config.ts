@@ -20,7 +20,15 @@ export default defineConfig({
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
         ],
       },
-      workbox: { navigateFallback: '/index.html', globPatterns: ['**/*.{js,css,html,png,svg}'] },
+      workbox: {
+        navigateFallback: '/index.html',
+        globPatterns: ['**/*.{js,css,html,png,svg}'],
+        runtimeCaching: [{
+          urlPattern: /^https:\/\/cyberjapandata\.gsi\.go\.jp\/xyz\//,
+          handler: 'CacheFirst',
+          options: { cacheName: 'gsi-tiles', cacheableResponse: { statuses: [0, 200] } },
+        }],
+      },
     }),
   ],
 })

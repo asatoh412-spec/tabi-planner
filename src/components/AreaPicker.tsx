@@ -4,20 +4,8 @@ import 'leaflet/dist/leaflet.css'
 import { deleteArea, listAreas, newId, saveArea } from '../db'
 import { gsiGeocode } from '../api/clients'
 import type { MapArea } from '../types'
+import { GSI_ATTR, GSI_URL, tileUrls } from '../lib/tiles'
 
-export const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noreferrer">出典：国土地理院</a>'
-export const GSI_URL = 'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png'
-
-/** 指定範囲・ズームの地図画像の枚数（オフライン保存の見積もり用） */
-export function tileCount(center: { lat: number; lng: number }, radiusKm: number, minZ: number, maxZ: number) {
-  let n = 0
-  for (let z = minZ; z <= maxZ; z++) {
-    const kmPerTile = (40075 * Math.cos((center.lat * Math.PI) / 180)) / 2 ** z
-    const side = Math.ceil((radiusKm * 2) / kmPerTile) + 1
-    n += side * side
-  }
-  return n
-}
 
 export default function AreaPicker() {
   const mapDiv = useRef<HTMLDivElement>(null)
@@ -65,7 +53,7 @@ export default function AreaPicker() {
     await saveArea(a); setAreas(await listAreas()); setMsg(`「${a.name}」を保存しました`)
   }
 
-  const est = center ? tileCount(center, radius, 14, 17) : 0
+  const est = center ? tileUrls({ id: '', name: '', center, radiusKm: radius, minZoom: 14, maxZoom: 17, createdAt: '', tilesSavedAt: null }).length : 0
 
   return (
     <section className="page">
