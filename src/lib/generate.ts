@@ -1,6 +1,6 @@
 import { claudeJSON, gsiGeocode, placesCandidates, rakutenVacant, type Candidate, type ClaudeUsage } from '../api/clients'
 import { newId } from '../db'
-import type { Conditions, Day, EventInfo, MapArea, OfficialInfo, Plan, Settings, Stop, StopKind, Trip } from '../types'
+import type { Conditions, Day, EventInfo, HotelCandidate, MapArea, OfficialInfo, Plan, Settings, Stop, StopKind, Trip } from '../types'
 import { peek, remember } from './live'
 import { PACE_LIMITS, apiCount, coordOf, nameOf, scheduleAndValidate } from './schedule'
 import { addDays, daysBetween, dow, today } from './time'
@@ -221,22 +221,30 @@ export async function fetchOfficialInfo(s: Settings, plan: Plan, meter: CostMete
   return { ...plan, days: plan.days.map(d => ({ ...d, stops: d.stops.map(x => (found.has(x.placeId) ? { ...x, official: found.get(x.placeId) } : x)) })) }
 }
 
-// ---------- 宿（楽天トラベル空室検索） ----------
+// ---------- 宿（Google Places の宿泊施設＋予約サイトへのリンク、楽天キーがあれば空室検索も） ----------
 
-export async function fetchHotels(s: Settings, plan: Plan, adults: number, progress: Progress): Promise<Plan> {
+export async function fetchHotels(s: Settings, plan: Plan, adults: number, meter: CostMeter, progress: Progress): Promise<Plan> {
   const days = [...plan.days]
+  const useRakuten = !!(s.rakutenAppId && s.rakutenAccessKey)
   for (let i = 0; i < days.length - 1; i++) {
     const last = days[i].stops.at(-1)
     const p = last && coordOf(last)
     if (!p) continue
     progress(`${i + 1}日目の宿を探しています`)
-    const r = await rakutenVacant(s, p, 3, days[i].date, days[i + 1].date, adults)
     const now = new Date().toISOString()
-    days[i] = {
-      ...days[i], hotelsFetchedAt: now,
-      hotels: r.hotels.slice(0, 8).map(h => ({ hotelNo: h.hotelNo, name: h.hotelName, minCharge: h.hotelMinCharge, url: h.planListUrl ?? h.hotelInformationUrl ?? '', fetchedAt: now })),
+    const hotels: HotelCandidate[] = []
+    meter.places++
+    const g = await placesCandidates(s, `${days[i].lodgingArea ?? ''} ホテル 旅館`.trim(), p, 3000, 8, 'lodging')
+    g.forEach(remember)
+    hotels.push(...g.map(h => ({ source: 'google' as const, placeId: h.id, fetchedAt: now })))
+    if (useRakuten) {
+      try {
+        const r = await rakutenVacant(s, p, 3, days[i].date, days[i + 1].date, adults)
+        hotels.push(...r.hotels.slice(0, 8).map(h => ({ source: 'rakuten' as const, hotelNo: h.hotelNo, name: h.hotelName, minCharge: h.hotelMinCharge, url: h.planListUrl ?? h.hotelInformationUrl ?? '', fetchedAt: now })))
+      } catch (e) { progress(`楽天の空室検索に失敗：${(e as Error).message}`) }
+      await new Promise(res => setTimeout(res, 1100)) // 楽天の短時間連続アクセス制限への配慮
     }
-    await new Promise(res => setTimeout(res, 1100)) // 楽天の短時間連続アクセス制限への配慮
+    days[i] = { ...days[i], hotels, hotelsFetchedAt: now }
   }
   return { ...plan, days }
 }

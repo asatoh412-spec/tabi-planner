@@ -5,6 +5,7 @@ import { CostMeter, combinePlans, fetchHotels, fetchOfficialInfo, regenerateDay 
 import { remember, useLive } from '../lib/live'
 import { PACE_LIMITS, nameOf, scheduleAndValidate } from '../lib/schedule'
 import { fmtDate } from '../lib/time'
+import { bookingLinks } from '../lib/transit'
 import type { Conditions, Day, Leg, Plan, Stop, Trip } from '../types'
 import { GoogleRouteMap, PLAN_COLORS } from './Maps'
 
@@ -71,10 +72,9 @@ export default function TripView({ tripId, onBack, onRegenerate }: { tripId: str
           })
         }}
         onOfficial={() => run('公式サイトを確認しています', async (m, pr) => { const s = await getSettings(); await replacePlan(await fetchOfficialInfo(s, plan, m, pr)) })}
-        onHotels={() => run('宿を探しています', async (_m, pr) => {
+        onHotels={() => run('宿を探しています', async (m, pr) => {
           const s = await getSettings()
-          if (!s.rakutenAppId || !s.rakutenAccessKey) throw new Error('楽天のアプリIDとアクセスキーが未設定です')
-          await replacePlan(await fetchHotels(s, plan, c.adults ?? 1, pr))
+          await replacePlan(await fetchHotels(s, plan, c.adults ?? 1, m, pr))
         })}
         onRegenDay={i => run(`${i + 1}日目を作り直しています`, async (m, pr) => {
           const s = await getSettings(); const area = await getArea(c.areaId!)
@@ -138,16 +138,7 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
 
       <GoogleRouteMap routes={routes} />
 
-      {di < plan.days.length - 1 && <div className="box">
-        <h3>宿の候補（{fmtDate(day.date)}泊）</h3>
-        {day.hotelsFetchedAt
-          ? day.hotels.length
-            ? <ul className="list">{day.hotels.map(h => <li key={h.hotelNo}><a href={h.url} target="_blank" rel="noreferrer">{h.name}</a><span className="note">{h.minCharge ? `${h.minCharge.toLocaleString()}円〜` : ''}</span></li>)}</ul>
-            : <p className="note">楽天トラベルで空室が見つかりませんでした（半径3km）</p>
-          : <p className="note">「宿を探す」で楽天トラベルの空室を検索します</p>}
-        {day.hotelsFetchedAt && <p className="note">{day.hotelsFetchedAt.slice(0, 16).replace('T', ' ')} 時点の空き状況。予約は各ページで行ってください。</p>}
-        <p className="credit"><a href="https://developers.rakuten.com/" target="_blank" rel="noreferrer">Supported by Rakuten Developers</a></p>
-      </div>}
+      {di < plan.days.length - 1 && <Hotels day={day} next={plan.days[di + 1]} adults={c.adults ?? 1} />}
     </div>
   )
 }
@@ -223,6 +214,39 @@ function ReplaceSearch({ areaId, onPick }: { areaId: string; onPick: (c: Candida
   </div>
 }
 
+// ---------------- 宿 ----------------
+
+function Hotels({ day, next, adults }: { day: Day; next: Day; adults: number }) {
+  const google = day.hotels.filter(h => h.source === 'google')
+  const rakuten = day.hotels.filter(h => h.source === 'rakuten')
+  const areaWord = day.lodgingArea ?? '宿泊エリア'
+  return <div className="box">
+    <h3>宿の候補（{fmtDate(day.date)}泊）</h3>
+    {!day.hotelsFetchedAt && <p className="note">「宿を探す」で、この日の最後の立ち寄り先から3km以内の宿を探します</p>}
+    {day.hotelsFetchedAt && google.length === 0 && rakuten.length === 0 && <p className="note">宿が見つかりませんでした（半径3km）</p>}
+    {google.length > 0 && <ul className="list hotels">{google.map(h => <GoogleHotel key={h.placeId} placeId={h.placeId!} checkin={day.date} checkout={next.date} adults={adults} />)}</ul>}
+    {google.length > 0 && <p className="note">情報：Google Maps。空室と料金は各予約サイトで確認してください。</p>}
+    {rakuten.length > 0 && <>
+      <h3>楽天トラベルの空室</h3>
+      <ul className="list">{rakuten.map(h => <li key={h.hotelNo}><a href={h.url} target="_blank" rel="noreferrer">{h.name}</a><span className="note">{h.minCharge ? `${h.minCharge.toLocaleString()}円〜` : ''}</span></li>)}</ul>
+      <p className="note">{day.hotelsFetchedAt!.slice(0, 16).replace('T', ' ')} 時点の空き状況</p>
+      <p className="credit"><a href="https://developers.rakuten.com/" target="_blank" rel="noreferrer">Supported by Rakuten Developers</a></p>
+    </>}
+    {day.lodgingArea && <p className="note">エリアで探す（{areaWord}）：{bookingLinks(day.lodgingArea, day.date, next.date, adults).map(l => <a key={l.url} className="bk" href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}</p>}
+  </div>
+}
+
+function GoogleHotel({ placeId, checkin, checkout, adults }: { placeId: string; checkin: string; checkout: string; adults: number }) {
+  const live = useLive(placeId)
+  if (!live) return <li className="note">（宿の情報はオンライン時に表示します）</li>
+  return <li className="hotel">
+    <div><b>{live.name}</b> <span className="note">{live.typeLabel ?? ''}{live.rating ? `・評価${live.rating}（${live.ratingCount}件）` : ''}{live.priceLevel ? `・${PRICE[live.priceLevel] ?? ''}` : ''}</span></div>
+    <div className="note">{bookingLinks(live.name, checkin, checkout, adults).map(l => <a key={l.url} className="bk" href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}<a className="bk" href={live.mapsUri ?? `https://www.google.com/maps/place/?q=place_id:${placeId}`} target="_blank" rel="noreferrer">Googleマップ</a></div>
+  </li>
+}
+
+const PRICE: Record<string, string> = { PRICE_LEVEL_INEXPENSIVE: '価格帯：安め', PRICE_LEVEL_MODERATE: '価格帯：中', PRICE_LEVEL_EXPENSIVE: '価格帯：高め', PRICE_LEVEL_VERY_EXPENSIVE: '価格帯：かなり高め' }
+
 // ---------------- 破綻の提示 ----------------
 
 function Conflict({ trip, plan, onRegenerate }: { trip: Trip; plan: Plan; onRegenerate: (c: Conditions) => void }) {
@@ -274,7 +298,7 @@ function Compare({ trip, onCombine }: { trip: Trip; onCombine: (picks: string[])
           <tr><th>各日の空き</th>{plans.map(p => <td key={p.id}>{p.days.map(d => d.slackMinutes).join(' / ')} 分</td>)}</tr>
           <tr><th>立ち寄り数</th>{plans.map(p => <td key={p.id}>{p.days.map(d => d.stops.length).join(' / ')}</td>)}</tr>
           <tr><th>入場料など</th>{plans.map(p => <td key={p.id}>{p.days.flatMap(d => d.stops).filter(s => s.official?.fee).map(s => `${s.official!.name}：${s.official!.fee}`).join('、') || '公式情報の取得後に表示'}</td>)}</tr>
-          <tr><th>宿</th>{plans.map(p => <td key={p.id}>{p.days.slice(0, -1).map(d => (d.hotelsFetchedAt ? `${d.hotels.length}件${d.hotels.length ? `（${Math.min(...d.hotels.map(h => h.minCharge ?? Infinity)).toLocaleString()}円〜）` : ''}` : '未検索')).join(' / ') || '日帰り'}</td>)}</tr>
+          <tr><th>宿</th>{plans.map(p => <td key={p.id}>{p.days.slice(0, -1).map(d => { if (!d.hotelsFetchedAt) return '未検索'; const yen = d.hotels.map(h => h.minCharge).filter((x): x is number => !!x); return `${d.hotels.length}件${yen.length ? `（楽天${Math.min(...yen).toLocaleString()}円〜）` : ''}` }).join(' / ') || '日帰り'}</td>)}</tr>
           <tr><th>見頃・イベント</th>{plans.map(p => <td key={p.id}>{evText(p)}</td>)}</tr>
         </tbody>
       </table>

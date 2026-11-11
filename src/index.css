@@ -98,3 +98,5 @@ h3 { font-size: 15px; margin: 4px 0 8px; }
 .num-pin { background: var(--accent); color: var(--accent-ink); border-radius: 50%; text-align: center; line-height: 24px; font-size: 12px; font-weight: 600; border: 2px solid #fff; }
 .cards li { flex-wrap: wrap; }
 .tabs button { font-size: 14px; }
+.bk { margin-right: 10px; color: var(--accent); white-space: nowrap; }
+.hotels li { display: block; }

@@ -109,12 +109,13 @@ const toCandidate = (p: RawPlace): Candidate => ({
 })
 
 /** 営業時間・評価を含む検索（Enterprise料金：月1,000件まで無料） */
-export async function placesCandidates(s: Settings, query: string, center: LatLng, radiusM: number, max = 10): Promise<Candidate[]> {
+export async function placesCandidates(s: Settings, query: string, center: LatLng, radiusM: number, max = 10, includedType?: string): Promise<Candidate[]> {
   const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': s.googleKey, 'X-Goog-FieldMask': CANDIDATE_MASK },
     body: JSON.stringify({
       textQuery: query, languageCode: 'ja', regionCode: 'JP', pageSize: max,
+      ...(includedType ? { includedType, strictTypeFiltering: true } : {}),
       locationBias: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: Math.min(50000, radiusM) } },
     }),
   })

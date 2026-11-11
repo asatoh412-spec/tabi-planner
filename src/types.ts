@@ -92,11 +92,15 @@ export interface Leg {
 
 export interface EventInfo { title: string; period?: string; place?: string; sourceUrl: string; checkedAt: string }
 
+/** 宿の候補。Google由来（source:'google'）は場所IDだけを保存し、名前などは表示時に取得する */
 export interface HotelCandidate {
-  hotelNo: number
-  name: string
+  source: 'rakuten' | 'google'
+  hotelNo?: number
+  placeId?: string
+  /** 楽天のみ保存（Googleの宿名は保存しない） */
+  name?: string
   minCharge?: number
-  url: string
+  url?: string
   fetchedAt: string
 }
 

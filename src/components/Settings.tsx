@@ -30,7 +30,7 @@ export default function Settings() {
       ['Routes 徒歩', async () => { const r = await routesCompute(s, station, castle, 'WALK'); const x = r.routes?.[0]; return x ? `${Math.round(parseInt(x.duration) / 60)}分・${x.distanceMeters}m` : '経路なし' }],
       ['Routes 電車（日本は対象外の想定）', async () => { const r = await routesCompute(s, station, { lat: 40.8222, lng: 140.7474 }, 'TRANSIT'); const x = r.routes?.[0]; return x ? `経路あり ${Math.round(parseInt(x.duration) / 60)}分` : '経路なし（想定どおり）' }],
       ['Claude', async () => { const r = await claudeMessage(s, '「接続OK」とだけ返してください。'); return `${r.content.find(c => c.type === 'text')?.text ?? ''}（入力${r.usage.input_tokens}・出力${r.usage.output_tokens}トークン）` }],
-      ['楽天トラベル空室検索', async () => { const d = new Date(Date.now() + 30 * 864e5); const r = await rakutenVacant(s, castle, 3, ymd(d), ymd(new Date(d.getTime() + 864e5))); return `${r.hotels.length}件: ${r.hotels[0]?.hotelName ?? '（空室なし）'}` }],
+      ['楽天トラベル空室検索（任意）', async () => { if (!s.rakutenAppId) return '未設定（宿はGoogleと予約サイトへのリンクで探します）'; const d = new Date(Date.now() + 30 * 864e5); const r = await rakutenVacant(s, castle, 3, ymd(d), ymd(new Date(d.getTime() + 864e5))); return `${r.hotels.length}件: ${r.hotels[0]?.hotelName ?? '（空室なし）'}` }],
     ]
     for (const [k, fn] of tests) {
       try { put(k, { ok: true, text: await fn() }) } catch (e) { put(k, { ok: false, text: (e as Error).message }) }
