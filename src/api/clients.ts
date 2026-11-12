@@ -198,13 +198,18 @@ export async function claudeJSON<T>(s: Settings, system: string, user: string, o
   }
   const body: Record<string, unknown> = { model: s.claudeModel, max_tokens: opts.maxTokens ?? 8000, system, messages: [{ role: 'user', content: user }] }
   if (opts.tool) {
+    // 道具の使用を強制する指定（tool_choice: tool）は、モデルによっては使えない（2026-11-12 実測：claude-sonnet-5-5 で 400）。
+    // そのため「自動」にして、指示で必ず使わせる。使われなかったときは文章からの読み取りに回す
     body.tools = [opts.tool]
-    body.tool_choice = { type: 'tool', name: opts.tool.name }
+    body.tool_choice = { type: 'auto' }
+    body.system = `${system}\n- 必ず ${opts.tool.name} を1回だけ呼んで結果を提出する。文章では答えない`
     const j = await callClaude(s, body)
     addUsage(j)
-    const t = (j.content ?? []).find(b => b.type === 'tool_use')
-    if (!t?.input) throw new Error(`Claudeが決まった形で答えませんでした（終了理由：${j.stop_reason ?? '不明'}）`)
-    return { data: t.input as T, usage, sources: [] }
+    const t = (j.content ?? []).find(b => b.type === 'tool_use' && b.name === opts.tool!.name)
+    if (t?.input) return { data: t.input as T, usage, sources: [] }
+    const text0 = (j.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '').join('')
+    try { return { data: extractJSON<T>(text0), usage, sources: [] } } catch { /* 下の出し直しへ */ }
+    return repair(text0, j.stop_reason, [])
   }
   if (opts.maxSearches) body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: opts.maxSearches, user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }]
   const j = await callClaude(s, body)
@@ -215,16 +220,21 @@ export async function claudeJSON<T>(s: Settings, system: string, user: string, o
   try {
     return { data: extractJSON<T>(text), usage, sources }
   } catch {
-    // 文章が混ざってJSONを取り出せなかったとき：同じ内容をJSONだけで出し直してもらう（検索はしない）
+    return repair(text, j.stop_reason, sources)
+  }
+
+  // 文章が混ざってJSONを取り出せなかったとき：同じ内容をJSONだけで出し直してもらう（検索も道具も使わない）
+  async function repair(text: string, stop: string | undefined, sources: string[]): Promise<{ data: T; usage: ClaudeUsage; sources: string[] }> {
+    const shape = opts.tool ? `\n形：${JSON.stringify(opts.tool.input_schema)}` : ''
     const j2 = await callClaude(s, { model: s.claudeModel, max_tokens: opts.maxTokens ?? 8000, system, messages: [
       { role: 'user', content: user },
       { role: 'assistant', content: text || '（返答なし）' },
-      { role: 'user', content: '上の返答の内容を、指定のJSONの形だけで出し直してください。説明文やコードブロックの印は付けないでください。' },
+      { role: 'user', content: `上の返答の内容を、JSONだけで出し直してください。説明文やコードブロックの印は付けないでください。${shape}` },
     ] })
     addUsage(j2)
     const text2 = (j2.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '').join('')
     try { return { data: extractJSON<T>(text2), usage, sources } } catch {
-      throw new Error(`Claudeの返答からJSONを読み取れませんでした（終了理由：${j.stop_reason ?? '不明'}、返答の冒頭：${text.slice(0, 80).replace(/\s+/g, ' ')}…）`)
+      throw new Error(`Claudeの返答からJSONを読み取れませんでした（終了理由：${stop ?? '不明'}、返答の冒頭：${text.slice(0, 80).replace(/\s+/g, ' ')}…）`)
     }
   }
 }
