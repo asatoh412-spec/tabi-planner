@@ -4,7 +4,7 @@ import type { Conditions, Day, EventInfo, HotelCandidate, LatLng, MapArea, Offic
 import { peek, remember } from './live'
 import { PACE_LIMITS, apiCount, coordOf, nameOf, scheduleAndValidate } from './schedule'
 import { addDays, daysBetween, dow, fromMin, toMin, today } from './time'
-import { distanceKm, ensureHomeTravel, ensureOrigin } from './geo'
+import { distanceKm, ensureHomeTravel, ensureOrigin, validCoord } from './geo'
 
 export type Progress = (msg: string) => void
 
@@ -56,6 +56,13 @@ export async function gatherCandidates(s: Settings, c: Conditions, areas: MapAre
     add(await q(a, c.food ? `${c.food} ${a.name}` : `${a.name} 郷土料理`, 6))
     add(await q(a, `${a.name} カフェ`, 3))
     add(await q(a, `${a.name} 観光名所`, areas.length > 1 ? 10 : 15))
+  }
+  // 玄関口（到着駅など）の近くでの時間調整用：お土産・カフェ・駅近の名所
+  if (c.origin && validCoord(c.origin.coord)) {
+    progress(`${c.origin.label}の周辺の候補を探しています`)
+    meter.places++
+    const near = await placesCandidates(s, `${c.origin.label} 周辺 お土産 カフェ`, c.origin.coord, 2000, 6)
+    add(near)
   }
   void main
 
@@ -144,6 +151,8 @@ const SYSTEM = `あなたは国内旅行の行程を組み立てる担当です�
 - 範囲が複数ある場合は、日ごとに回る範囲をまとめ、範囲の間の移動は1日1回程度にする
 - 最終日以外は、その日の最後にアプリが lodgingArea の近くの宿を置く。宿へは19:00までに着けるよう、最後の立ち寄り先を lodgingArea の近くにする
 - 初日は玄関口（到着駅など）から始まり、最終日は玄関口に戻って終わる
+- 各日の時間（開始〜終了）をなるべく使い切る。最終日は、玄関口を出る時刻の15〜45分前に玄関口に着くよう、最後は玄関口の近くのお土産・カフェ・名所で時間を調整する
+- 「余裕がある」「時間があく」という指摘には、候補から予定を足すか滞在時間を延ばして応える
 - rainPlan は雨天時の代案を1〜2文（候補の名前を使ってよい）。lodgingArea は宿泊に向いたエリア名（最終日は不要）
 - 結果は submit_itinerary で提出する`
 
@@ -230,7 +239,7 @@ export async function generatePlan(s: Settings, c: Conditions, areas: MapArea[],
     progress(`「${angle}」の移動時間と営業時間を確認しています（${attempt + 1}回目）`)
     plan = await scheduleAndValidate(s, c, plan)
     plan.attempts = attempt + 1
-    if (plan.status === 'ok' || attempt >= s.maxRepair) return plan
+    if (!plan.issues.length || attempt >= s.maxRepair) return plan
     progress(`「${angle}」の破綻を直しています（${plan.issues.length}件）`)
     const fix = `${base}\n\n前回の案：\n${JSON.stringify(planToDraft(plan))}\n\n計算で見つかった破綻：\n${plan.issues.map(i => `- ${i.text}`).join('\n')}\n\n各日の移動時間（分）と空き時間：\n${plan.days.map((d, i) => `${i + 1}日目 移動${d.moveMinutes}分・余り${d.slackMinutes}分・歩行${(d.walkMeters / 1000).toFixed(1)}km`).join('\n')}\n\n破綻を解消した案を同じ形式で出し直してください。必須同士がどうしても両立しない場合も、必須を黙って外さず、入れたまま出してください。`
     res = await claudeJSON<Draft>(s, SYSTEM, fix, { tool: DRAFT_TOOL, maxTokens: 16000 })

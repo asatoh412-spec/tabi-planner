@@ -65,6 +65,15 @@ export default function TripView({ tripId, onBack, onRegenerate }: { tripId: str
 
       {plan && <PlanView key={plan.id} trip={trip} plan={plan} busy={!!busy}
         onAdopt={() => persist({ ...trip, adoptedPlanId: plan.id })}
+        onEarlier={newEnd => run('早めに帰る予定に直しています', async () => {
+          const s = await getSettings()
+          const last = plan.days.length - 1
+          const travel = c.homeTravelMin ?? c.homeTravelEst ?? 0
+          const date = plan.days[last].date
+          const c2 = { ...c, end: `${date}T${c.endBasis === 'home' ? fromMin(toMin(newEnd) + travel) : newEnd}` }
+          const p2 = await scheduleAndValidate(s, c2, { ...plan, days: plan.days.map((d, i) => (i === last ? { ...d, endTime: newEnd } : d)) })
+          await persist({ ...trip, conditions: c2, plans: trip.plans.map(x => (x.id === p2.id ? p2 : x)) })
+        })}
         onChange={async p => {
           await run('移動時間と営業時間を確認し直しています', async () => {
             const s = await getSettings()
@@ -90,9 +99,9 @@ export default function TripView({ tripId, onBack, onRegenerate }: { tripId: str
 
 // ---------------- 1案の表示と調整 ----------------
 
-function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, onRegenDay, onRegenerate, onDelete }: {
+function PlanView({ trip, plan, busy, onAdopt, onEarlier, onChange, onOfficial, onHotels, onRegenDay, onRegenerate, onDelete }: {
   trip: Trip; plan: Plan; busy: boolean
-  onAdopt: () => void; onChange: (p: Plan) => void; onOfficial: () => void; onHotels: () => void
+  onAdopt: () => void; onEarlier: (newEnd: string) => void; onChange: (p: Plan) => void; onOfficial: () => void; onHotels: () => void
   onRegenDay: (i: number) => void; onRegenerate: (c: Conditions) => void; onDelete: () => void
 }) {
   const [di, setDi] = useState(0)
@@ -105,7 +114,24 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
 
   return (
     <div>
-      {plan.issues.length > 0 && <Conflict trip={trip} plan={plan} onRegenerate={onRegenerate} />}
+      {plan.issues.some(x => x.kind !== 'idle') && <Conflict trip={{ ...trip }} plan={{ ...plan, issues: plan.issues.filter(x => x.kind !== 'idle') }} onRegenerate={onRegenerate} />}
+      {plan.issues.filter(x => x.kind === 'idle').map((x, i) => {
+        const lastI = plan.days.length - 1
+        if (x.dayIndex !== lastI) return <p key={i} className="note">時間の余裕：{x.text}。「この日だけ作り直す」で埋められます。</p>
+        // 最終日：玄関口に着いてから20分後以降の便で帰る案
+        const d = plan.days[lastI]
+        const arrive = toMin(d.endTime) - d.slackMinutes
+        const dep = fromMin(Math.ceil((arrive + 20) / 10) * 10)
+        const travel = trip.conditions.homeTravelMin ?? trip.conditions.homeTravelEst ?? null
+        return <div key={i} className="box">
+          <p>時間の余裕：{x.text}。</p>
+          <div className="row wrap">
+            <button disabled={busy} onClick={() => onEarlier(dep)}>早めに帰る（{trip.conditions.origin?.label ?? '玄関口'} {dep}頃発{travel ? `・家に${fromMin(toMin(dep) + travel)}頃着` : ''}）</button>
+            <button disabled={busy} onClick={() => onRegenDay(lastI)}>この日だけ作り直して時間を埋める</button>
+          </div>
+          <p className="note">早めに帰る場合も、実際の便は乗換案内で確認してください。</p>
+        </div>
+      })}
       <div className="row wrap">
         {trip.adoptedPlanId !== plan.id && <button className="primary" onClick={onAdopt}>この案を採用</button>}
         <button disabled={busy} onClick={onOfficial}>公式サイトの情報を取得</button>

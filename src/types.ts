@@ -150,7 +150,7 @@ export interface Day {
   hotelsFetchedAt?: string
 }
 
-export interface Issue { dayIndex: number | null; stopId?: string; kind: 'missing_must' | 'closed' | 'over_time' | 'pace_count' | 'pace_walk' | 'other'; text: string }
+export interface Issue { dayIndex: number | null; stopId?: string; kind: 'missing_must' | 'closed' | 'over_time' | 'pace_count' | 'pace_walk' | 'idle' | 'other'; text: string }
 
 export interface Plan {
   id: string

@@ -115,6 +115,11 @@ export function validatePlan(c: Conditions, plan: Plan, missed: { dayIndex: numb
     const visits = d.stops.filter(s => s.kind !== 'meal').length
     if (visits > pace.stops) issues.push({ dayIndex: i, kind: 'pace_count', text: `${i + 1}日目：立ち寄り${visits}か所（${pace.label}の上限${pace.stops}）` })
     if (d.walkMeters / 1000 > pace.walkKm) issues.push({ dayIndex: i, kind: 'pace_walk', text: `${i + 1}日目：歩行${(d.walkMeters / 1000).toFixed(1)}km（${pace.label}の上限${pace.walkKm}km）` })
+    // 時間が大きく余っている（最終日は玄関口で長く待つ）なら、組み直しで予定を足してもらう。破綻ではないので「要対応」にはしない
+    const isLast = i === plan.days.length - 1
+    const idleLimit = isLast ? 60 : 150
+    if (d.slackMinutes > idleLimit) issues.push({ dayIndex: i, kind: 'idle', text: isLast ? `${i + 1}日目：${d.startPoint && plan.days[i].returnLeg ? '玄関口' : '終点'}に着いてから出発まで約${d.slackMinutes}分あく（玄関口の近くで予定を足せる）` : `${i + 1}日目：宿に着くまで約${d.slackMinutes}分の余裕がある（予定を足せる）` })
+    if (isLast && d.slackMinutes >= 0 && d.slackMinutes < 15 && plan.days[i].returnLeg) issues.push({ dayIndex: i, kind: 'over_time', text: `${i + 1}日目：玄関口に着くのが出発の${d.slackMinutes}分前で、乗り遅れの余裕がない` })
     if (i < plan.days.length - 1 && !d.lodging) issues.push({ dayIndex: i, kind: 'other', text: `${i + 1}日目：宿が決まっていない（「宿を探す」で選べます）` })
   })
   for (const m of missed) {
@@ -151,7 +156,7 @@ export async function scheduleAndValidate(s: Settings, c: Conditions, plan: Plan
   }
   const next = { ...plan, days }
   const { issues, wishHits } = validatePlan(c, next, missed)
-  return { ...next, issues, wishHits, status: issues.length ? 'conflict' : 'ok' }
+  return { ...next, issues, wishHits, status: issues.some(x => x.kind !== 'idle') ? 'conflict' : 'ok' }
 }
 
 /** 推定の時刻は15分単位に丸めて「頃」を付ける */
