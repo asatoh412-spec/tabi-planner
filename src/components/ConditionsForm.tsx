@@ -102,7 +102,7 @@ export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { 
       {areas.length === 0
         ? <p className="note">範囲が未登録です。<button className="link" onClick={goArea}>地図で範囲を指定する</button></p>
         : <>
-            <p className="note">回る範囲（複数選べます。範囲の間は車か公共交通で移動します）</p>
+            <p className="note">回る範囲（複数選べます。範囲の間も選んだ移動手段で移動します）</p>
             <div className="row wrap">{areas.map(a => <button key={a.id} className={`chipbtn ${c.areaIds.includes(a.id) ? 'on' : ''}`} onClick={() => upd({ areaIds: c.areaIds.includes(a.id) ? c.areaIds.filter(x => x !== a.id) : [...c.areaIds, a.id] })}>{a.name}（{a.radiusKm}km）</button>)}
               <button className="link" onClick={goArea}>＋範囲を追加</button></div>
           </>}

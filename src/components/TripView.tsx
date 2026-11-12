@@ -125,7 +125,7 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
         {di === 0 && c.home && c.origin && (c.startBasis === 'home' && c.start
           ? <li className="tl-leg">{c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={c.start.slice(11, 16)} /> <span className="note">（{c.start.slice(11, 16)}以降に出る便を探す）</span></li>
           : <li className="tl-leg">自宅（{c.home}）から {c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={day.startTime} byArrival /> <span className="note">（{day.startTime}に着く便を探す）</span></li>)}
-        <li className="tl-start"><b>{showTime(day.startTime, day.startApprox)}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}{day.startApprox && <span className="note">（家から約{c.homeTravelEst}分の目安：{c.homeTravelSource}）</span>}</li>
+        <li className="tl-start"><b>{showTime(day.startTime, day.startApprox)}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}{day.startApprox && (c.homeTravelEst ? <span className="note">（家から約{c.homeTravelEst}分の目安：{c.homeTravelSource}）</span> : <span className="err">（家からの所要時間が分からなかったため、家を出る時刻のまま計算しています。条件の「片道の所要時間」に入れて作り直してください）</span>)}</li>
         {day.stops.map((st, i) => (
           <StopItem key={st.id} stop={st} leg={day.legs[i]} index={i} count={day.stops.length} dayIssues={plan.issues.filter(x => x.stopId === st.id)}
             onPin={() => editStops(ss => ss.map(x => (x.id === st.id ? { ...x, pinned: !x.pinned } : x)))}
@@ -321,7 +321,6 @@ function Conflict({ trip, plan, onRegenerate }: { trip: Trip; plan: Plan; onRege
       <div className="row wrap">
         <button onClick={() => onRegenerate(extendOneDay())}>日を分ける（1日延ばす）</button>
         {musts.map(m => <button key={m.id} onClick={() => onRegenerate({ ...c, wishes: c.wishes.map(w => (w.id === m.id ? { ...w, priority: 'want' } : w)) })}>「{m.text}」をできればに下げる</button>)}
-        {c.mode !== 'car' && <button onClick={() => onRegenerate({ ...c, mode: 'car' })}>移動手段を車にする</button>}
       </div>
     </>}
     {!mustRelated && <p className="note">固定・入れ替え・順番の変更・「この日だけ作り直す」で調整できます。</p>}

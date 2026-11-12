@@ -168,6 +168,8 @@ export async function routeBetween(s: Settings, a: LatLng, b: LatLng, mode: 'WAL
 export interface ClaudeUsage { input: number; output: number; searches: number }
 
 /** JSONだけを返させる。web検索を使う場合は maxSearches > 0 */
+const webSearchTool = (n: number) => ({ type: 'web_search_20250305', name: 'web_search', max_uses: n, user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } })
+
 export interface JsonTool { name: string; description: string; input_schema: Record<string, unknown> }
 
 async function callClaude(s: Settings, body: Record<string, unknown>) {
@@ -200,18 +202,19 @@ export async function claudeJSON<T>(s: Settings, system: string, user: string, o
   if (opts.tool) {
     // 道具の使用を強制する指定（tool_choice: tool）は、モデルによっては使えない（2026-11-12 実測：claude-sonnet-5-5 で 400）。
     // そのため「自動」にして、指示で必ず使わせる。使われなかったときは文章からの読み取りに回す
-    body.tools = [opts.tool]
+    body.tools = opts.maxSearches ? [webSearchTool(opts.maxSearches), opts.tool] : [opts.tool]
     body.tool_choice = { type: 'auto' }
     body.system = `${system}\n- 必ず ${opts.tool.name} を1回だけ呼んで結果を提出する。文章では答えない`
     const j = await callClaude(s, body)
     addUsage(j)
     const t = (j.content ?? []).find(b => b.type === 'tool_use' && b.name === opts.tool!.name)
-    if (t?.input) return { data: t.input as T, usage, sources: [] }
+    const srcs = (j.content ?? []).filter(b => b.type === 'web_search_tool_result').flatMap(b => (Array.isArray(b.content) ? b.content : []).map(c => c.url ?? '')).filter(Boolean)
+    if (t?.input) return { data: t.input as T, usage, sources: srcs }
     const text0 = (j.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '').join('')
     try { return { data: extractJSON<T>(text0), usage, sources: [] } } catch { /* 下の出し直しへ */ }
     return repair(text0, j.stop_reason, [])
   }
-  if (opts.maxSearches) body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: opts.maxSearches, user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }]
+  if (opts.maxSearches) body.tools = [webSearchTool(opts.maxSearches)]
   const j = await callClaude(s, body)
   addUsage(j)
   const blocks = j.content ?? []

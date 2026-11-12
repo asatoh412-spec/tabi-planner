@@ -185,8 +185,8 @@ export function buildDaySkeletons(c: Conditions, areas: MapArea[], travel: { min
     date,
     startTime: i === 0 && c.start ? shift(c.start.slice(11, 16), c.startBasis === 'home' ? travel?.minutes ?? 0 : 0) : relaxed ? '10:00' : '09:00',
     endTime: i === dates.length - 1 && c.end ? shift(c.end.slice(11, 16), c.endBasis === 'home' ? -(travel?.minutes ?? 0) : 0) : relaxed ? '18:00' : '19:30',
-    startApprox: i === 0 && !!c.start && c.startBasis === 'home' && !!travel?.estimated,
-    endApprox: i === dates.length - 1 && !!c.end && c.endBasis === 'home' && !!travel?.estimated,
+    startApprox: i === 0 && !!c.start && c.startBasis === 'home' && (!travel || travel.estimated),
+    endApprox: i === dates.length - 1 && !!c.end && c.endBasis === 'home' && (!travel || travel.estimated),
     startPoint: origin, stops: [], legs: [], walkMeters: 0, moveMinutes: 0, slackMinutes: 0, hotels: [],
   }))
 }

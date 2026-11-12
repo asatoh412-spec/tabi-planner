@@ -46,7 +46,8 @@ async function makeLeg(s: Settings, c: Conditions, a: LatLng, b: LatLng, aName: 
   // 公共交通の区間（電車・バス）：Routesの電車モードは日本で使えない（2026-11-12 実測）ため、車の所要時間×1.3＋待ち10分で仮置きし、乗換案内で確認してもらう
   const drive = await route(s, a, b, 'DRIVE')
   const minutes = drive ? Math.round(drive.minutes * 1.3) + 10 : Math.round((walk?.minutes ?? 60) / 3)
-  return { mode: 'train', minutes, estimated: true, transitLinks: transitLinks(aName, bName, a, b, date, hhmm), polyline: drive?.polyline }
+  // 所要時間の目安は道路の距離から推定しているが、経路は車道ではないので地図には線を引かない（直線で表示）
+  return { mode: 'train', minutes, estimated: true, transitLinks: transitLinks(aName, bName, a, b, date, hhmm) }
 }
 
 /** 区間を進める。使用者が乗換案内で調べた時刻があればそれを使い、推定区間のあとは「頃」扱いにする */
