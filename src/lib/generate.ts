@@ -113,6 +113,28 @@ export function chooseLodging(plan: Plan, dayIndex: number, h: Candidate): Plan 
 interface DraftDay { date: string; stops: { id: string; stayMin: number; kind: StopKind }[]; lodgingArea?: string; rainPlan?: string }
 interface Draft { days: DraftDay[] }
 
+const DRAFT_TOOL = {
+  name: 'submit_itinerary',
+  description: '組み立てた行程を提出する',
+  input_schema: {
+    type: 'object', required: ['days'],
+    properties: {
+      days: {
+        type: 'array',
+        items: {
+          type: 'object', required: ['date', 'stops'],
+          properties: {
+            date: { type: 'string', description: 'YYYY-MM-DD' },
+            stops: { type: 'array', items: { type: 'object', required: ['id', 'stayMin', 'kind'], properties: { id: { type: 'string', description: '候補のid' }, stayMin: { type: 'integer' }, kind: { type: 'string', enum: ['sight', 'meal', 'cafe', 'shop', 'other'] } } } },
+            lodgingArea: { type: 'string' },
+            rainPlan: { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+}
+
 const SYSTEM = `あなたは国内旅行の行程を組み立てる担当です。
 - 立ち寄り先は、与えられた候補の id からだけ選ぶ。候補にない場所を作らない
 - 必須は全部入れる。できればは時間が許す範囲で入れる。除外に当たるものは入れない
@@ -123,7 +145,7 @@ const SYSTEM = `あなたは国内旅行の行程を組み立てる担当です�
 - 最終日以外は、その日の最後にアプリが lodgingArea の近くの宿を置く。宿へは19:00までに着けるよう、最後の立ち寄り先を lodgingArea の近くにする
 - 初日は玄関口（到着駅など）から始まり、最終日は玄関口に戻って終わる
 - rainPlan は雨天時の代案を1〜2文（候補の名前を使ってよい）。lodgingArea は宿泊に向いたエリア名（最終日は不要）
-- 出力はJSONのみ：{"days":[{"date":"YYYY-MM-DD","stops":[{"id":"候補id","stayMin":60,"kind":"sight|meal|cafe|shop|other"}],"lodgingArea":"","rainPlan":""}]}`
+- 結果は submit_itinerary で提出する`
 
 function describeCandidates(pool: Candidate[], dates: string[]) {
   const wd = [...new Set(dates.map(dow))]
@@ -200,7 +222,7 @@ export async function generatePlan(s: Settings, c: Conditions, areas: MapArea[],
   const skeleton = buildDaySkeletons(c, areas, travel)
   const base = `${describeConditions(c, skeleton, pool, angle, areas)}\n\n候補（id | 名前 | 種類 | 評価(件数) | 緯度,経度 | 該当曜日の営業時間）：\n${describeCandidates(pool.all, skeleton.map(d => d.date))}`
   progress(`「${angle}」の案を組み立てています`)
-  let res = await claudeJSON<Draft>(s, SYSTEM, base)
+  let res = await claudeJSON<Draft>(s, SYSTEM, base, { tool: DRAFT_TOOL, maxTokens: 16000 })
   meter.add(res.usage)
   let plan = draftToPlan(res.data, skeleton, angle, pool.all)
   for (let attempt = 0; ; attempt++) {
@@ -211,7 +233,7 @@ export async function generatePlan(s: Settings, c: Conditions, areas: MapArea[],
     if (plan.status === 'ok' || attempt >= s.maxRepair) return plan
     progress(`「${angle}」の破綻を直しています（${plan.issues.length}件）`)
     const fix = `${base}\n\n前回の案：\n${JSON.stringify(planToDraft(plan))}\n\n計算で見つかった破綻：\n${plan.issues.map(i => `- ${i.text}`).join('\n')}\n\n各日の移動時間（分）と空き時間：\n${plan.days.map((d, i) => `${i + 1}日目 移動${d.moveMinutes}分・余り${d.slackMinutes}分・歩行${(d.walkMeters / 1000).toFixed(1)}km`).join('\n')}\n\n破綻を解消した案を同じ形式で出し直してください。必須同士がどうしても両立しない場合も、必須を黙って外さず、入れたまま出してください。`
-    res = await claudeJSON<Draft>(s, SYSTEM, fix)
+    res = await claudeJSON<Draft>(s, SYSTEM, fix, { tool: DRAFT_TOOL, maxTokens: 16000 })
     meter.add(res.usage)
     plan = draftToPlan(res.data, skeleton, angle, pool.all)
   }
@@ -226,9 +248,9 @@ export async function regenerateDay(s: Settings, trip: Trip, plan: Plan, dayInde
   const pinned = day.stops.filter(x => x.pinned)
   pinned.forEach(p => { const l = peek(p.placeId); if (l && !pool.all.some(x => x.id === l.id)) pool.all.push(l) })
   const cands = pool.all.filter(x => !others.has(x.id))
-  const prompt = `${describeConditions(c, [day], pool, plan.angle, areas)}\n\nこの日（${day.date} ${day.startTime}〜${day.endTime}、出発地点 ${day.startPoint.label}）だけを作り直します。\n固定（必ず残す。順番は変えてよい）：${pinned.map(p => `id=${p.placeId} ${nameOf(p)}`).join('、') || 'なし'}\n他の日に入っている場所は使わない。\n\n候補：\n${describeCandidates(cands, [day.date])}\n\n出力は {"days":[1日分]} の形式で。`
+  const prompt = `${describeConditions(c, [day], pool, plan.angle, areas)}\n\nこの日（${day.date} ${day.startTime}〜${day.endTime}、出発地点 ${day.startPoint.label}）だけを作り直します。\n固定（必ず残す。順番は変えてよい）：${pinned.map(p => `id=${p.placeId} ${nameOf(p)}`).join('、') || 'なし'}\n他の日に入っている場所は使わない。\n\n候補：\n${describeCandidates(cands, [day.date])}\n\n1日分だけを days に入れて提出する。`
   progress(`${dayIndex + 1}日目を作り直しています`)
-  const res = await claudeJSON<Draft>(s, SYSTEM, prompt)
+  const res = await claudeJSON<Draft>(s, SYSTEM, prompt, { tool: DRAFT_TOOL, maxTokens: 16000 })
   meter.add(res.usage)
   const one = draftToPlan(res.data, [day], plan.angle, cands, plan)
   const days = plan.days.map((d, i) => (i === dayIndex ? { ...one.days[0], hotels: d.hotels, hotelsFetchedAt: d.hotelsFetchedAt, lodging: d.lodging?.pinned ? d.lodging : undefined } : d))

@@ -17,6 +17,7 @@ export default function AreaPicker({ onBack, onSaved }: { onBack?: () => void; o
   const [q, setQ] = useState('')
   const [areas, setAreas] = useState<MapArea[]>([])
   const [msg, setMsg] = useState('')
+  const [noKey, setNoKey] = useState(false)
 
   useEffect(() => { listAreas().then(setAreas) }, [])
   useEffect(() => { const f = () => setMsg(mapsAuthError); addEventListener('gmaps-auth-failure', f); if (mapsAuthError) f(); return () => removeEventListener('gmaps-auth-failure', f) }, [])
@@ -25,7 +26,7 @@ export default function AreaPicker({ onBack, onSaved }: { onBack?: () => void; o
     let off = false
     ;(async () => {
       const s = await getSettings()
-      if (!s.googleKey) { setMsg('GoogleのAPIキーを設定タブで入れてください'); return }
+      if (!s.googleKey) { setNoKey(true); return }
       try { await loadGoogleMaps(s.googleKey) } catch (e) { setMsg((e as Error).message); return }
       if (off || !div.current) return
       const m = new google.maps.Map(div.current, { center: { lat: 37.5, lng: 138.5 }, zoom: 5, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
@@ -80,7 +81,8 @@ export default function AreaPicker({ onBack, onSaved }: { onBack?: () => void; o
         <input placeholder="地名・駅名で探す（例：角館駅）" value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()} />
         <button onClick={search}>探す</button>
       </div>
-      <div ref={div} className="map" />
+      {noKey && <p className="note map-err">この端末（ブラウザ）にはGoogleのAPIキーがまだ入っていません。キーは端末ごとに保存されるので、「設定」タブで入れてから開き直してください。</p>}
+      <div ref={div} className="map" style={noKey ? { display: 'none' } : undefined} />
       <label>半径 {radius} km
         <input type="range" min={1} max={50} step={1} value={radius} onChange={e => setRadius(Number(e.target.value))} />
       </label>
@@ -97,6 +99,7 @@ export default function AreaPicker({ onBack, onSaved }: { onBack?: () => void; o
             <li key={a.id}>
               <button className="link" onClick={() => { setCenter(a.center); setRadius(a.radiusKm); setName(a.name); map.current?.setCenter(a.center); map.current?.setZoom(a.radiusKm > 15 ? 9 : 11) }}>{a.name}</button>
               <span className="note">半径{a.radiusKm}km</span>
+              <button className="ghost" onClick={async () => { const n = prompt('範囲の名前', a.name); if (n) { await saveArea({ ...a, name: n }); setAreas(await listAreas()) } }}>名前を変える</button>
               <button className="ghost" onClick={async () => { await deleteArea(a.id); setAreas(await listAreas()) }}>削除</button>
             </li>
           ))}

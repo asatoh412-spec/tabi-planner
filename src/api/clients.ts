@@ -168,12 +168,9 @@ export async function routeBetween(s: Settings, a: LatLng, b: LatLng, mode: 'WAL
 export interface ClaudeUsage { input: number; output: number; searches: number }
 
 /** JSONだけを返させる。web検索を使う場合は maxSearches > 0 */
-export async function claudeJSON<T>(s: Settings, system: string, user: string, opts: { maxTokens?: number; maxSearches?: number } = {}): Promise<{ data: T; usage: ClaudeUsage; sources: string[] }> {
-  const body: Record<string, unknown> = {
-    model: s.claudeModel, max_tokens: opts.maxTokens ?? 8000, system,
-    messages: [{ role: 'user', content: user }],
-  }
-  if (opts.maxSearches) body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: opts.maxSearches, user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }]
+export interface JsonTool { name: string; description: string; input_schema: Record<string, unknown> }
+
+async function callClaude(s: Settings, body: Record<string, unknown>) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -184,11 +181,52 @@ export async function claudeJSON<T>(s: Settings, system: string, user: string, o
   })
   const j = await r.json()
   if (!r.ok) throw new Error(`Claude HTTP ${r.status}: ${j?.error?.message ?? ''}`)
-  const blocks = (j.content ?? []) as { type: string; text?: string; content?: { url?: string }[] }[]
+  return j as { content?: { type: string; text?: string; name?: string; input?: unknown; content?: { url?: string }[] }[]; stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number } } }
+}
+
+/**
+ * JSONを返させる。
+ * - tool を渡すと、その道具を必ず使わせ、引数（決まった形のJSON）として受け取る（形が崩れない）
+ * - web検索を使う場合（maxSearches > 0）は文章からJSONを取り出し、取り出せなければ「JSONだけで出し直して」ともう一度頼む
+ */
+export async function claudeJSON<T>(s: Settings, system: string, user: string, opts: { maxTokens?: number; maxSearches?: number; tool?: JsonTool; onUsage?: (u: ClaudeUsage) => void } = {}): Promise<{ data: T; usage: ClaudeUsage; sources: string[] }> {
+  const usage: ClaudeUsage = { input: 0, output: 0, searches: 0 }
+  const addUsage = (j: Awaited<ReturnType<typeof callClaude>>) => {
+    const u = { input: j.usage?.input_tokens ?? 0, output: j.usage?.output_tokens ?? 0, searches: j.usage?.server_tool_use?.web_search_requests ?? 0 }
+    usage.input += u.input; usage.output += u.output; usage.searches += u.searches
+    opts.onUsage?.(u)
+  }
+  const body: Record<string, unknown> = { model: s.claudeModel, max_tokens: opts.maxTokens ?? 8000, system, messages: [{ role: 'user', content: user }] }
+  if (opts.tool) {
+    body.tools = [opts.tool]
+    body.tool_choice = { type: 'tool', name: opts.tool.name }
+    const j = await callClaude(s, body)
+    addUsage(j)
+    const t = (j.content ?? []).find(b => b.type === 'tool_use')
+    if (!t?.input) throw new Error(`Claudeが決まった形で答えませんでした（終了理由：${j.stop_reason ?? '不明'}）`)
+    return { data: t.input as T, usage, sources: [] }
+  }
+  if (opts.maxSearches) body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: opts.maxSearches, user_location: { type: 'approximate', country: 'JP', timezone: 'Asia/Tokyo' } }]
+  const j = await callClaude(s, body)
+  addUsage(j)
+  const blocks = j.content ?? []
   const text = blocks.filter(b => b.type === 'text').map(b => b.text ?? '').join('')
   const sources = blocks.filter(b => b.type === 'web_search_tool_result').flatMap(b => (Array.isArray(b.content) ? b.content : []).map(c => c.url ?? '')).filter(Boolean)
-  const usage: ClaudeUsage = { input: j.usage?.input_tokens ?? 0, output: j.usage?.output_tokens ?? 0, searches: j.usage?.server_tool_use?.web_search_requests ?? 0 }
-  return { data: extractJSON<T>(text), usage, sources }
+  try {
+    return { data: extractJSON<T>(text), usage, sources }
+  } catch {
+    // 文章が混ざってJSONを取り出せなかったとき：同じ内容をJSONだけで出し直してもらう（検索はしない）
+    const j2 = await callClaude(s, { model: s.claudeModel, max_tokens: opts.maxTokens ?? 8000, system, messages: [
+      { role: 'user', content: user },
+      { role: 'assistant', content: text || '（返答なし）' },
+      { role: 'user', content: '上の返答の内容を、指定のJSONの形だけで出し直してください。説明文やコードブロックの印は付けないでください。' },
+    ] })
+    addUsage(j2)
+    const text2 = (j2.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '').join('')
+    try { return { data: extractJSON<T>(text2), usage, sources } } catch {
+      throw new Error(`Claudeの返答からJSONを読み取れませんでした（終了理由：${j.stop_reason ?? '不明'}、返答の冒頭：${text.slice(0, 80).replace(/\s+/g, ' ')}…）`)
+    }
+  }
 }
 
 export function extractJSON<T>(text: string): T {
