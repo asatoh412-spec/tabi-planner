@@ -40,6 +40,24 @@ export default function TripView({ tripId, onBack, onRegenerate }: { tripId: str
       <h1>{trip.name}</h1>
       <p className="note">{plan ? `${fmtDate(plan.days[0].date)}〜${fmtDate(plan.days.at(-1)!.date)}・` : ''}{PACE_LIMITS[c.pace ?? 'standard'].label}・{{ train: '電車中心', car: '車', walk_transit: '徒歩＋公共交通' }[c.mode ?? 'walk_transit']}</p>
 
+      <TimeEditor trip={trip} busy={!!busy} onFull={() => onRegenerate(c, trip.name)} onApply={c2 => run('時刻を変えて計算し直しています', async () => {
+        const s = await getSettings()
+        const travel = c2.homeTravelMin ?? c2.homeTravelEst ?? 0
+        const startT = c2.start ? fromMin(toMin(c2.start.slice(11, 16)) + (c2.startBasis === 'home' ? travel : 0)) : null
+        const endT = c2.end ? fromMin(toMin(c2.end.slice(11, 16)) - (c2.endBasis === 'home' ? travel : 0)) : null
+        const est = !c2.homeTravelMin && !!c2.homeTravelEst
+        const plans: Plan[] = []
+        for (const p of trip.plans) {
+          const last = p.days.length - 1
+          const days = p.days.map((d, i) => ({
+            ...d,
+            ...(i === 0 && startT ? { startTime: startT, startApprox: c2.startBasis === 'home' && est } : {}),
+            ...(i === last && endT ? { endTime: endT, endApprox: c2.endBasis === 'home' && est } : {}),
+          }))
+          plans.push(await scheduleAndValidate(s, c2, { ...p, days }))
+        }
+        await persist({ ...trip, conditions: c2, plans })
+      })} />
       {trip.events.length > 0 && <details className="box">
         <summary>見頃・イベント（{trip.events.length}件）</summary>
         <ul>{trip.events.map((e, i) => <li key={i}>{e.title}{e.period && `（${e.period}）`}{e.place && `・${e.place}`} <a href={e.sourceUrl} target="_blank" rel="noreferrer">出典</a> <span className="note">{e.checkedAt.slice(0, 10)}確認</span></li>)}</ul>
@@ -292,6 +310,41 @@ function PrintPlan({ trip, plan }: { trip: Trip; plan: Plan }) {
       {d.rainPlan && <p>雨の日：{d.rainPlan}</p>}
     </div>)}
     <p className="note">「頃」の付いた時刻は推定です。電車・バスは乗換案内で確認してください。</p>
+  </div>
+}
+
+/** 作成後に時刻の条件を変える。日付が変わらなければ、予定（立ち寄り先）はそのままで時刻だけ計算し直す（Claudeは呼ばない） */
+function TimeEditor({ trip, busy, onApply, onFull }: { trip: Trip; busy: boolean; onApply: (c: Conditions) => void; onFull: () => void }) {
+  const c = trip.conditions
+  const [open, setOpen] = useState(false)
+  const [start, setStart] = useState(c.start ?? '')
+  const [end, setEnd] = useState(c.end ?? '')
+  const [sb, setSb] = useState(c.startBasis ?? 'gateway')
+  const [eb, setEb] = useState(c.endBasis ?? 'gateway')
+  const [tm, setTm] = useState(c.homeTravelMin ? String(c.homeTravelMin) : '')
+  const sameDates = start.slice(0, 10) === (c.start ?? '').slice(0, 10) && end.slice(0, 10) === (c.end ?? '').slice(0, 10)
+  if (!open) return <div className="row"><button onClick={() => setOpen(true)}>条件を変える（出発・終了の時刻など）</button></div>
+  return <div className="box">
+    <h3>時刻の条件を変える</h3>
+    <div className="grid2">
+      <div>
+        <div className="seg small"><button className={sb === 'gateway' ? 'on' : ''} onClick={() => setSb('gateway')}>玄関口に着く</button><button className={sb === 'home' ? 'on' : ''} onClick={() => setSb('home')}>家を出る</button></div>
+        <label>{sb === 'home' ? '家を出る日時' : '玄関口に着く日時'}<input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /></label>
+      </div>
+      <div>
+        <div className="seg small"><button className={eb === 'gateway' ? 'on' : ''} onClick={() => setEb('gateway')}>玄関口を出る</button><button className={eb === 'home' ? 'on' : ''} onClick={() => setEb('home')}>家に着く</button></div>
+        <label>{eb === 'home' ? '家に着く日時' : '玄関口を出る日時'}<input type="datetime-local" value={end} onChange={e => setEnd(e.target.value)} /></label>
+      </div>
+    </div>
+    {(sb === 'home' || eb === 'home') && <label>家⇄玄関口の片道の所要時間（分）<input type="number" min={1} value={tm} onChange={e => setTm(e.target.value)} placeholder={c.homeTravelEst ? `空欄なら目安の${c.homeTravelEst}分` : '分'} /></label>}
+    {sameDates
+      ? <p className="note">日付が同じなので、今の予定のまま時刻だけ計算し直します（費用はかかりません）。予定の中身も変えたいときは「全体を作り直す」を使ってください。</p>
+      : <p className="note">日付（日数）が変わるので、予定を作り直す必要があります。</p>}
+    <div className="row wrap">
+      {sameDates && <button className="primary" disabled={busy} onClick={() => { setOpen(false); onApply({ ...c, start: start || null, end: end || null, startBasis: sb, endBasis: eb, homeTravelMin: tm ? Number(tm) : null }) }}>時刻だけ計算し直す</button>}
+      <button onClick={onFull}>条件の画面で全体を作り直す</button>
+      <button className="ghost" onClick={() => setOpen(false)}>閉じる</button>
+    </div>
   </div>
 }
 

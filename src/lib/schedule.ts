@@ -4,7 +4,7 @@ import { checkOpen } from './hours'
 import { fetchLive, peek } from './live'
 import { dow, fromMin, toMin } from './time'
 import { transitLinks } from './transit'
-import { ensureOrigin } from './geo'
+import { distanceKm, ensureOrigin } from './geo'
 
 export const PACE_LIMITS: Record<Pace, { stops: number; walkKm: number; label: string }> = {
   relaxed: { stops: 3, walkKm: 6, label: 'ゆったり' },
@@ -35,6 +35,7 @@ export function nameOf(stop: Stop): string {
 }
 
 async function makeLeg(s: Settings, c: Conditions, a: LatLng, b: LatLng, aName: string, bName: string, date: string, hhmm: string): Promise<Leg> {
+  if (distanceKm(a, b) < 0.05) return { mode: 'walk', minutes: 0, meters: 0 }
   const mode = c.mode ?? 'walk_transit'
   if (mode === 'car') {
     const r = await route(s, a, b, 'DRIVE')
