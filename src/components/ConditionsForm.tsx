@@ -14,7 +14,7 @@ interface OriginCand { title: string; sub: string; coord: { lat: number; lng: nu
 
 export interface StartRequest { name: string; conditions: Conditions; withEvents: boolean }
 
-export default function ConditionsForm({ initial, onStart, goArea }: { initial?: { name: string; conditions: Conditions }; onStart: (r: StartRequest) => void; goArea: () => void }) {
+export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { initial?: { name: string; conditions: Conditions; withEvents?: boolean }; onStart: (r: StartRequest) => void; goArea: () => void; onDraft?: (d: StartRequest) => void }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [c, setC] = useState<Conditions>(initial ? normalizeConditions(initial.conditions) : emptyConditions())
   const [areas, setAreas] = useState<MapArea[]>([])
@@ -23,7 +23,8 @@ export default function ConditionsForm({ initial, onStart, goArea }: { initial?:
   const [originMsg, setOriginMsg] = useState('')
   const [wishText, setWishText] = useState('')
   const [wishPri, setWishPri] = useState<Priority>('must')
-  const [withEvents, setWithEvents] = useState(true)
+  const [withEvents, setWithEvents] = useState(initial?.withEvents ?? true)
+  useEffect(() => { onDraft?.({ name, conditions: c, withEvents }) }, [name, c, withEvents])
 
   useEffect(() => { listAreas().then(a => { setAreas(a); if (!c.areaIds.length && a.length === 1) setC(x => ({ ...x, areaIds: [a[0].id] })) }); listPresets().then(setPresets) }, [])
 

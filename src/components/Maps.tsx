@@ -9,11 +9,16 @@ import type { Day, LatLng } from '../types'
 export const PLAN_COLORS = ['#2f6fb0', '#c2562d', '#3b8a4e', '#8a4fa3']
 
 let gmapsPromise: Promise<void> | null = null
+/** キーの拒否（制限やAPI未許可）を受け取ったときの理由。Google は gm_authFailure を呼ぶ */
+export let mapsAuthError = ''
 export function loadGoogleMaps(key: string) {
   if (gmapsPromise) return gmapsPromise
   gmapsPromise = new Promise((resolve, reject) => {
     const cb = '__gmapsReady'
-    ;(window as unknown as Record<string, unknown>)[cb] = () => resolve()
+    const w = window as unknown as Record<string, unknown>
+    w.gm_authFailure = () => { mapsAuthError = 'Google地図の読み込みがキーの設定で拒否されました。Google Cloud の「認証情報」で、このキーの「APIの制限」に Maps JavaScript API が入っているか、「ウェブサイトの制限」に https://tabi-planner.pages.dev/* が入っているかを確認してください。'; window.dispatchEvent(new Event('gmaps-auth-failure')) }
+    // loading=async では、コールバックの時点で地図の部品が揃っているとは限らないので、使う部品を明示して読み込む
+    w[cb] = () => { Promise.all([google.maps.importLibrary('maps'), google.maps.importLibrary('marker')]).then(() => resolve(), e => { gmapsPromise = null; reject(e) }) }
     const sc = document.createElement('script')
     sc.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&language=ja&region=JP&v=weekly&loading=async&callback=${cb}`
     sc.async = true
@@ -60,5 +65,6 @@ export function GoogleRouteMap({ routes, height = 320 }: { routes: MapRoute[]; h
     })()
     return () => { cancelled = true; overlays.forEach(o => o.setMap(null)) }
   }, [routes])
+  useEffect(() => { const f = () => setErr(mapsAuthError); addEventListener('gmaps-auth-failure', f); if (mapsAuthError) f(); return () => removeEventListener('gmaps-auth-failure', f) }, [])
   return err ? <p className="note map-err">{err}</p> : <div ref={div} className="map" style={{ height }} />
 }

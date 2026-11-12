@@ -3,10 +3,10 @@ import { useEffect, useRef, useState } from 'react'
 import { deleteArea, getSettings, listAreas, newId, saveArea } from '../db'
 import { gsiGeocode, placesLocate } from '../api/clients'
 import type { LatLng, MapArea } from '../types'
-import { loadGoogleMaps } from './Maps'
+import { loadGoogleMaps, mapsAuthError } from './Maps'
 
 /** 範囲の指定（Google地図）。地図をタップして中心を決め、半径を調整する */
-export default function AreaPicker() {
+export default function AreaPicker({ onBack, onSaved }: { onBack?: () => void; onSaved?: (a: MapArea) => void } = {}) {
   const div = useRef<HTMLDivElement>(null)
   const map = useRef<google.maps.Map | null>(null)
   const circle = useRef<google.maps.Circle | null>(null)
@@ -19,6 +19,7 @@ export default function AreaPicker() {
   const [msg, setMsg] = useState('')
 
   useEffect(() => { listAreas().then(setAreas) }, [])
+  useEffect(() => { const f = () => setMsg(mapsAuthError); addEventListener('gmaps-auth-failure', f); if (mapsAuthError) f(); return () => removeEventListener('gmaps-auth-failure', f) }, [])
 
   useEffect(() => {
     let off = false
@@ -66,11 +67,13 @@ export default function AreaPicker() {
   async function save() {
     if (!center) return
     const a: MapArea = { id: newId(), name: name || '無題の範囲', center, radiusKm: radius, minZoom: 0, maxZoom: 0, createdAt: new Date().toISOString(), tilesSavedAt: null }
-    await saveArea(a); const list = await listAreas(); setAreas(list); setMsg(`「${a.name}」を保存しました`); setCenter(null); setName(''); setQ('')
+    await saveArea(a); const list = await listAreas(); setAreas(list); setMsg(`「${a.name}」を保存しました${onSaved ? '（入力中の旅行に追加しました）' : ''}`); setCenter(null); setName(''); setQ('')
+    onSaved?.(a)
   }
 
   return (
     <section className="page">
+      {onBack && <button className="link" onClick={onBack}>← 入力中の旅行計画に戻る</button>}
       <h1>範囲の指定</h1>
       <p className="note">回りたい場所ごとに範囲を作ります（例：角館、田沢湖、乳頭温泉）。旅行の条件で複数選べます。</p>
       <div className="row">
@@ -86,6 +89,7 @@ export default function AreaPicker() {
         <button className="primary" disabled={!center} onClick={save}>この範囲を保存</button>
         {msg && <span className="note">{msg}</span>}
       </div>
+      {onBack && <div className="row"><button onClick={onBack}>入力中の旅行計画に戻る</button></div>}
       {areas.length > 0 && <>
         <h2>保存した範囲</h2>
         <ul className="list">
