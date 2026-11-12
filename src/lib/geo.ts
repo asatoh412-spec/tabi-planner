@@ -28,23 +28,30 @@ export async function ensureHomeTravel(s: Settings, c: Conditions, onUsage?: (u:
   // 以前の版が車の経路で代用した値は、公共交通を選んでいるなら使わずに調べ直す
   if (c.homeTravelEst && (c.mode === 'car' || !String(c.homeTravelSource ?? '').startsWith('車の経路'))) return { minutes: c.homeTravelEst, estimated: true }
   if (!c.home || !c.origin) return null
+  let lastError = '検索に失敗'
   // 公共交通なら、ウェブ検索で標準的な所要時間を出典付きで調べる（時刻や運賃は推測させない。所要時間の目安だけ）
   if (c.mode !== 'car' && s.anthropicKey) {
     try {
       const res = await claudeJSON<{ minutes?: number | string; route?: string; sourceUrl?: string }>(s,
-        'ウェブ検索で調べた事実だけを書く。記憶から書かない。出典URLが確認できなければ minutes を返さない。',
-        `「${c.home}」から「${c.origin.label}」まで、公共交通（新幹線・特急・在来線・バス・飛行機など一般的な経路）で行くときの、乗り換えを含む標準的な所要時間を調べ、report_travel_time で報告してください。`,
-        { maxSearches: 3, maxTokens: 3000, tool: { name: 'report_travel_time', description: '調べた所要時間を報告する', input_schema: { type: 'object', required: ['minutes', 'sourceUrl'], properties: { minutes: { type: 'integer', description: '乗り換え込みの片道の所要時間（分）' }, route: { type: 'string', description: '主な経路を1行で' }, sourceUrl: { type: 'string' } } } } })
+        'ウェブ検索で調べた事実だけを使う。記憶から数字を書かない。',
+        `「${c.home}」から「${c.origin.label}」まで、公共交通（新幹線・特急・在来線・バス・飛行機など一般的な経路）で行くときの、乗り換えを含む標準的な片道の所要時間を調べ、report_travel_time で報告してください。
+調べ方：
+1. まず「${c.home} ${c.origin.label} 所要時間」で探す
+2. 直接の情報がなければ、最寄りの主要ターミナル（東京駅・上野駅・新宿駅・羽田空港など）から「${c.origin.label}」までの所要時間を探す。観光協会や自治体の「アクセス」のページによく載っている
+3. 2を使った場合は、「${c.home}」からそのターミナルまでの所要時間と乗り換えの余裕（15分程度）を足す
+4. 「最速」と書かれた値はそのまま使ってよい。route に経路と、足し算した場合はその内訳を書く`,
+        { maxSearches: 5, maxTokens: 4000, tool: { name: 'report_travel_time', description: '調べた所要時間を報告する', input_schema: { type: 'object', required: ['minutes', 'sourceUrl'], properties: { minutes: { type: 'integer', description: '乗り換え込みの片道の所要時間（分）' }, route: { type: 'string', description: '主な経路を1行で' }, sourceUrl: { type: 'string' } } } } })
       onUsage?.(res.usage)
       const m = toMinutes(res.data.minutes)
+      if (!m) lastError = '検索で所要時間を読み取れなかった'
       if (m && m > 0 && m < 24 * 60 && res.data.sourceUrl) {
         c.homeTravelEst = Math.round(m); c.homeTravelSource = `${res.data.route ?? ''} ${res.data.sourceUrl}`.trim()
         return { minutes: c.homeTravelEst, estimated: true }
       }
-    } catch { /* 見つからなければ下で「不明」にする */ }
+    } catch (e) { lastError = (e as Error).message }
   }
   // 公共交通を選んでいるのに車の経路で代用はしない（使用者の指摘 2026-11-12）。分からなければ「不明」として、所要時間の入力を促す
-  if (c.mode !== 'car') { c.homeTravelSource = '不明'; return null }
+  if (c.mode !== 'car') { c.homeTravelSource = `不明（${lastError}）`; return null }
   if (!validCoord(c.origin.coord)) return null
   let h: LatLng | undefined = (await gsiGeocode(c.home).catch(() => []))[0]?.coord
   if (s.googleKey) {

@@ -183,7 +183,23 @@ async function callClaude(s: Settings, body: Record<string, unknown>) {
   })
   const j = await r.json()
   if (!r.ok) throw new Error(`Claude HTTP ${r.status}: ${j?.error?.message ?? ''}`)
-  return j as { content?: { type: string; text?: string; name?: string; input?: unknown; content?: { url?: string }[] }[]; stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number } } }
+  return j as ClaudeResp
+}
+
+type ClaudeResp = { content?: { type: string; text?: string; name?: string; input?: unknown; content?: { url?: string }[] }[]; stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number } } }
+
+/** サーバー側の道具（ウェブ検索）が長引くと pause_turn で一度返ってくるので、続きを頼んで1つの返答にまとめる */
+async function callClaudeAll(s: Settings, body: Record<string, unknown>, onEach: (j: ClaudeResp) => void): Promise<ClaudeResp> {
+  let j = await callClaude(s, body)
+  onEach(j)
+  const content = [...(j.content ?? [])]
+  for (let k = 0; k < 3 && j.stop_reason === 'pause_turn'; k++) {
+    const msgs = [...(body.messages as unknown[]), { role: 'assistant', content: j.content }]
+    j = await callClaude(s, { ...body, messages: msgs })
+    onEach(j)
+    content.push(...(j.content ?? []))
+  }
+  return { ...j, content }
 }
 
 /**
@@ -193,7 +209,7 @@ async function callClaude(s: Settings, body: Record<string, unknown>) {
  */
 export async function claudeJSON<T>(s: Settings, system: string, user: string, opts: { maxTokens?: number; maxSearches?: number; tool?: JsonTool; onUsage?: (u: ClaudeUsage) => void } = {}): Promise<{ data: T; usage: ClaudeUsage; sources: string[] }> {
   const usage: ClaudeUsage = { input: 0, output: 0, searches: 0 }
-  const addUsage = (j: Awaited<ReturnType<typeof callClaude>>) => {
+  const addUsage = (j: ClaudeResp) => {
     const u = { input: j.usage?.input_tokens ?? 0, output: j.usage?.output_tokens ?? 0, searches: j.usage?.server_tool_use?.web_search_requests ?? 0 }
     usage.input += u.input; usage.output += u.output; usage.searches += u.searches
     opts.onUsage?.(u)
@@ -205,8 +221,7 @@ export async function claudeJSON<T>(s: Settings, system: string, user: string, o
     body.tools = opts.maxSearches ? [webSearchTool(opts.maxSearches), opts.tool] : [opts.tool]
     body.tool_choice = { type: 'auto' }
     body.system = `${system}\n- 必ず ${opts.tool.name} を1回だけ呼んで結果を提出する。文章では答えない`
-    const j = await callClaude(s, body)
-    addUsage(j)
+    const j = await callClaudeAll(s, body, addUsage)
     const t = (j.content ?? []).find(b => b.type === 'tool_use' && b.name === opts.tool!.name)
     const srcs = (j.content ?? []).filter(b => b.type === 'web_search_tool_result').flatMap(b => (Array.isArray(b.content) ? b.content : []).map(c => c.url ?? '')).filter(Boolean)
     if (t?.input) return { data: t.input as T, usage, sources: srcs }
@@ -215,8 +230,7 @@ export async function claudeJSON<T>(s: Settings, system: string, user: string, o
     return repair(text0, j.stop_reason, [])
   }
   if (opts.maxSearches) body.tools = [webSearchTool(opts.maxSearches)]
-  const j = await callClaude(s, body)
-  addUsage(j)
+  const j = await callClaudeAll(s, body, addUsage)
   const blocks = j.content ?? []
   const text = blocks.filter(b => b.type === 'text').map(b => b.text ?? '').join('')
   const sources = blocks.filter(b => b.type === 'web_search_tool_result').flatMap(b => (Array.isArray(b.content) ? b.content : []).map(c => c.url ?? '')).filter(Boolean)

@@ -125,7 +125,7 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
         {di === 0 && c.home && c.origin && (c.startBasis === 'home' && c.start
           ? <li className="tl-leg">{c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={c.start.slice(11, 16)} /> <span className="note">（{c.start.slice(11, 16)}以降に出る便を探す）</span></li>
           : <li className="tl-leg">自宅（{c.home}）から {c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={day.startTime} byArrival /> <span className="note">（{day.startTime}に着く便を探す）</span></li>)}
-        <li className="tl-start"><b>{showTime(day.startTime, day.startApprox)}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}{day.startApprox && (c.homeTravelEst ? <span className="note">（家から約{c.homeTravelEst}分の目安：{c.homeTravelSource}）</span> : <span className="err">（家からの所要時間が分からなかったため、家を出る時刻のまま計算しています。条件の「片道の所要時間」に入れて作り直してください）</span>)}</li>
+        <li className="tl-start"><b>{showTime(day.startTime, day.startApprox)}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}{day.startApprox && (c.homeTravelEst ? <span className="note">（家から約{c.homeTravelEst}分の目安：{c.homeTravelSource}）</span> : <span className="err">（家からの所要時間を調べられなかったため、家を出る時刻のまま計算しています（{c.homeTravelSource}）。条件の「片道の所要時間」に入れて作り直してください）</span>)}</li>
         {day.stops.map((st, i) => (
           <StopItem key={st.id} stop={st} leg={day.legs[i]} index={i} count={day.stops.length} dayIssues={plan.issues.filter(x => x.stopId === st.id)}
             onPin={() => editStops(ss => ss.map(x => (x.id === st.id ? { ...x, pinned: !x.pinned } : x)))}
