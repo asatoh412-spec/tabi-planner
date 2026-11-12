@@ -3,14 +3,13 @@ import AreaPicker from './components/AreaPicker'
 import ConditionsForm, { type StartRequest } from './components/ConditionsForm'
 import Generating from './components/Generating'
 import Settings from './components/Settings'
-import TravelView from './components/TravelView'
 import TripView from './components/TripView'
 import { deleteTrip, listTrips, purgeExpiredGoogleCoords } from './db'
 import { fmtDate } from './lib/time'
 import type { Conditions, Trip } from './types'
 
 type View =
-  | { k: 'trips' } | { k: 'area' } | { k: 'settings' } | { k: 'travel' }
+  | { k: 'trips' } | { k: 'area' } | { k: 'settings' }
   | { k: 'new'; initial?: { name: string; conditions: Conditions } }
   | { k: 'gen'; req: StartRequest } | { k: 'trip'; id: string }
 
@@ -41,6 +40,9 @@ export default function App() {
   const [online, setOnline] = useState(navigator.onLine)
   useEffect(() => {
     purgeExpiredGoogleCoords()
+    // 以前のPWA版が残した Service Worker とキャッシュを消す（古い版が表示され続けるのを防ぐ）
+    navigator.serviceWorker?.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {})
+    caches?.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {})
     const on = () => setOnline(true), off = () => setOnline(false)
     addEventListener('online', on); addEventListener('offline', off)
     return () => { removeEventListener('online', on); removeEventListener('offline', off) }
@@ -49,18 +51,17 @@ export default function App() {
   const tab = view.k === 'new' || view.k === 'gen' || view.k === 'trip' ? 'trips' : view.k
   return (
     <div className="app">
-      {!online && <div className="offline">オフライン表示中（保存済みの日程と地図だけ表示します）</div>}
+      {!online && <div className="offline no-print">オフラインです（このアプリはオンラインで使います）</div>}
       <main>
         {view.k === 'trips' && <Trips open={id => setView({ k: 'trip', id })} create={() => setView({ k: 'new' })} />}
         {view.k === 'new' && <ConditionsForm initial={view.initial} onStart={req => setView({ k: 'gen', req })} goArea={() => setView({ k: 'area' })} />}
         {view.k === 'gen' && <Generating req={view.req} onDone={onDone} onCancel={() => setView({ k: 'new', initial: { name: view.req.name, conditions: view.req.conditions } })} />}
         {view.k === 'trip' && <TripView tripId={view.id} onBack={() => setView({ k: 'trips' })} onRegenerate={(c, name) => setView({ k: 'new', initial: { name, conditions: c } })} />}
         {view.k === 'area' && <AreaPicker />}
-        {view.k === 'travel' && <TravelView />}
         {view.k === 'settings' && <Settings />}
       </main>
-      <nav className="tabs">
-        {([['trips', '旅行'], ['travel', '旅行中'], ['area', '範囲'], ['settings', '設定']] as const).map(([k, l]) =>
+      <nav className="tabs no-print">
+        {([['trips', '旅行'], ['area', '範囲'], ['settings', '設定']] as const).map(([k, l]) =>
           <button key={k} className={tab === k ? 'on' : ''} onClick={() => setView({ k } as View)}>{l}</button>)}
       </nav>
     </div>

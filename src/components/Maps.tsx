@@ -1,17 +1,15 @@
 /// <reference types="google.maps" />
 import { useEffect, useRef, useState } from 'react'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
 import { getSettings } from '../db'
 import { decodePolyline } from '../lib/polyline'
+import { validCoord } from '../lib/geo'
 import { coordOf, nameOf } from '../lib/schedule'
-import { GSI_ATTR, GSI_URL } from '../lib/tiles'
 import type { Day, LatLng } from '../types'
 
 export const PLAN_COLORS = ['#2f6fb0', '#c2562d', '#3b8a4e', '#8a4fa3']
 
 let gmapsPromise: Promise<void> | null = null
-function loadGoogleMaps(key: string) {
+export function loadGoogleMaps(key: string) {
   if (gmapsPromise) return gmapsPromise
   gmapsPromise = new Promise((resolve, reject) => {
     const cb = '__gmapsReady'
@@ -46,7 +44,7 @@ export function GoogleRouteMap({ routes, height = 320 }: { routes: MapRoute[]; h
         r.days.forEach(d => {
           const path: google.maps.LatLngLiteral[] = []
           const push = (p: LatLng) => { path.push({ lat: p.lat, lng: p.lng }); bounds.extend(p) }
-          push(d.startPoint)
+          if (validCoord(d.startPoint)) push(d.startPoint)
           d.stops.forEach((st, i) => {
             const leg = d.legs[i]
             if (leg?.polyline) decodePolyline(leg.polyline).forEach(([lat, lng]) => push({ lat, lng }))
@@ -63,21 +61,4 @@ export function GoogleRouteMap({ routes, height = 320 }: { routes: MapRoute[]; h
     return () => { cancelled = true; overlays.forEach(o => o.setMap(null)) }
   }, [routes])
   return err ? <p className="note map-err">{err}</p> : <div ref={div} className="map" style={{ height }} />
-}
-
-/** 国土地理院の地図。載せるのは自前の控え（公式サイトの住所から求めた座標）だけ */
-export function GsiDayMap({ points, center, height = 320 }: { points: { label: string; coord: LatLng; n: number }[]; center?: LatLng; height?: number }) {
-  const div = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!div.current) return
-    const m = L.map(div.current)
-    L.tileLayer(GSI_URL, { attribution: GSI_ATTR, maxZoom: 18, minZoom: 5, crossOrigin: true }).addTo(m)
-    const ll = points.map(p => L.latLng(p.coord.lat, p.coord.lng))
-    points.forEach(p => L.marker([p.coord.lat, p.coord.lng], { icon: L.divIcon({ className: 'num-pin', html: String(p.n), iconSize: [24, 24] }) }).bindTooltip(p.label).addTo(m))
-    if (ll.length > 1) L.polyline(ll, { color: '#2f5d50', weight: 3, dashArray: '6 6' }).addTo(m)
-    if (ll.length) m.fitBounds(L.latLngBounds(ll).pad(0.2), { maxZoom: 16 })
-    else m.setView(center ? [center.lat, center.lng] : [35.68, 139.77], center ? 14 : 6)
-    return () => { m.remove() }
-  }, [points, center])
-  return <div ref={div} className="map" style={{ height }} />
 }

@@ -32,16 +32,21 @@ export interface Wish {
   placeId?: string
 }
 
-/** 国土地理院の住所検索で求めた地点（地理院地図に載せてよい） */
-export interface Origin { label: string; coord: LatLng }
+/** 出発地点。国土地理院の住所検索なら保存してよい。Google（Places）由来なら placeId と取得日を持ち、座標は30日で破棄して取り直す */
+export interface Origin { label: string; coord: LatLng; source?: 'gsi' | 'google'; placeId?: string; fetchedAt?: string }
 
 export interface Conditions {
   start: string | null // 'YYYY-MM-DDTHH:mm'
   end: string | null
-  origin: Origin | null // 初日の出発地点（駅など）
+  /** 現地の玄関口（到着駅・空港など）。初日はここから始まり、最終日はここで終わる */
+  origin: Origin | null
+  /** 自宅（往復の乗換案内リンク用。座標は使わない） */
+  home: string | null
   mode: Mode | null
   pace: Pace | null
-  areaId: string | null
+  /** 旧形式（1か所）。読み込み時に areaIds へ移す */
+  areaId?: string | null
+  areaIds: string[]
   wishes: Wish[]
   food: string | null
   lodging: string | null
@@ -66,7 +71,7 @@ export interface OfficialInfo {
   needsCheck: boolean
 }
 
-export type StopKind = 'sight' | 'meal' | 'cafe' | 'shop' | 'other'
+export type StopKind = 'sight' | 'meal' | 'cafe' | 'shop' | 'other' | 'lodging'
 
 export interface Stop {
   id: string
@@ -78,6 +83,10 @@ export interface Stop {
   kind: StopKind
   pinned: boolean
   official?: OfficialInfo
+  /** 時刻が推定（公共交通の推定区間のあと）か */
+  approx?: boolean
+  /** 乗換案内で調べた、この地点へ向かう公共交通の発車・到着時刻（使用者が入力） */
+  transitIn?: { depart?: string; arrive: string }
 }
 
 export interface Leg {
@@ -108,12 +117,18 @@ export interface Day {
   date: string // 'YYYY-MM-DD'
   startTime: string
   endTime: string
-  startPoint: LatLng & { label: string }
+  /** Google由来の座標なら fetchedAt を持つ（30日で破棄） */
+  startPoint: LatLng & { label: string; fetchedAt?: string }
   stops: Stop[]
   /** legs[i] は stops[i-1]（i=0 は startPoint）から stops[i] への区間 */
   legs: Leg[]
-  /** 最終日のみ：最後の立ち寄り先から出発地点（帰りの駅など）へ */
+  /** 最終日のみ：最後の立ち寄り先から玄関口（帰りの駅など）へ */
   returnLeg?: Leg
+  /** 最終日以外：その日に泊まる宿と、そこへの区間 */
+  lodging?: Stop
+  lodgingLeg?: Leg
+  /** 帰りの玄関口に着く時刻が推定か */
+  returnApprox?: boolean
   lodgingArea?: string
   rainPlan?: string
   walkMeters: number
@@ -157,6 +172,12 @@ export interface Settings {
 }
 
 export const emptyConditions = (): Conditions => ({
-  start: null, end: null, origin: null, mode: null, pace: null, areaId: null,
+  start: null, end: null, origin: null, home: null, mode: null, pace: null, areaIds: [],
   wishes: [], food: null, lodging: null, budget: null, adults: null, angles: [],
 })
+
+/** 旧形式の条件を今の形に直す */
+export function normalizeConditions(c: Conditions): Conditions {
+  const areaIds = c.areaIds ?? (c.areaId ? [c.areaId] : [])
+  return { ...emptyConditions(), ...c, areaIds, home: c.home ?? null }
+}

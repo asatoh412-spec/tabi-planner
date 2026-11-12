@@ -33,7 +33,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 .tests td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .tests td.err { color: var(--err); }
 .credit { margin-top: 24px; font-size: 12px; }
-.credit a, .leaflet-control-attribution a { color: var(--accent); }
+.credit a { color: var(--accent); }
 .tabs { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
 .tabs button { flex: 1; border: none; border-radius: 0; padding: 14px 0; background: none; color: var(--muted); }
 .tabs button.on { color: var(--accent); font-weight: 600; }
@@ -100,3 +100,21 @@ h3 { font-size: 15px; margin: 4px 0 8px; }
 .tabs button { font-size: 14px; }
 .bk { margin-right: 10px; color: var(--accent); white-space: nowrap; }
 .hotels li { display: block; }
+.print-only { display: none; }
+.lodging { border-style: dashed !important; }
+.link.small { font-size: 13px; padding: 2px 4px; }
+.tin { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.tin input { width: auto; display: inline-block; padding: 4px; font-size: 14px; margin: 0; }
+.tin button { padding: 4px 8px; font-size: 13px; }
+@media print {
+  body { background: #fff; color: #000; }
+  body * { visibility: hidden; }
+  .print-only, .print-only * { visibility: visible; }
+  .print-only { display: block; position: absolute; top: 0; left: 0; right: 0; padding: 0 8mm; font-size: 11pt; }
+  .print-only h1 { font-size: 16pt; }
+  .print-only h2 { font-size: 13pt; margin: 10pt 0 4pt; }
+  .print-only table { border-collapse: collapse; width: 100%; }
+  .print-only td { border-bottom: 1px solid #ccc; padding: 3pt 4pt; vertical-align: top; }
+  .print-only td:first-child { white-space: nowrap; width: 5em; }
+  .print-day { break-inside: avoid; }
+}

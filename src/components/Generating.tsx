@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getArea, getSettings, newId, saveTrip } from '../db'
+import { getSettings, listAreas, newId, saveTrip } from '../db'
 import { CostMeter, fetchEvents, gatherCandidates, generatePlan } from '../lib/generate'
 import type { Plan, Trip } from '../types'
 import type { StartRequest } from './ConditionsForm'
@@ -21,10 +21,10 @@ export default function Generating({ req, onDone, onCancel }: { req: StartReques
         const s = await getSettings()
         const missing = [!s.googleKey && 'Google', !s.anthropicKey && 'Claude'].filter(Boolean)
         if (missing.length) throw new Error(`${missing.join('・')}のAPIキーが未設定です（設定タブ）`)
-        const area = await getArea(req.conditions.areaId!)
-        if (!area) throw new Error('範囲が見つかりません')
         const c = structuredClone(req.conditions)
-        const pool = await gatherCandidates(s, c, area, meter, progress)
+        const areas = (await listAreas()).filter(a => c.areaIds.includes(a.id))
+        if (!areas.length) throw new Error('範囲が選ばれていません')
+        const pool = await gatherCandidates(s, c, areas, meter, progress)
         progress(`候補 ${pool.all.length}か所を集めました`)
         const missingMust = c.wishes.filter(w => w.priority === 'must' && !pool.wishPlace[w.id])
         if (missingMust.length) progress(`注意：必須「${missingMust.map(w => w.text).join('、')}」が範囲内で見つかりませんでした`)
@@ -32,13 +32,13 @@ export default function Generating({ req, onDone, onCancel }: { req: StartReques
         const plans: Plan[] = []
         for (const a of angles) {
           if (stop.current) break
-          plans.push(await generatePlan(s, c, area, pool, a, meter, progress))
+          plans.push(await generatePlan(s, c, areas, pool, a, meter, progress))
           setCost(meter.summary())
         }
         let events: Trip['events'] = []
         if (req.withEvents && !stop.current) {
           progress('見頃・イベントを調べています')
-          try { events = await fetchEvents(s, area, c, meter) } catch (e) { progress(`見頃・イベントの取得に失敗：${(e as Error).message}`) }
+          try { events = await fetchEvents(s, areas, c, meter) } catch (e) { progress(`見頃・イベントの取得に失敗：${(e as Error).message}`) }
         }
         const trip: Trip = { id: newId(), name: req.name, conditions: c, plans, adoptedPlanId: null, events, createdAt: new Date().toISOString() }
         await saveTrip(trip)

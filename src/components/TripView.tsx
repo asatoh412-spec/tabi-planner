@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getArea, getSettings, getTrip, saveTrip } from '../db'
+import { getSettings, getTrip, listAreas, saveTrip } from '../db'
 import { placesCandidates, type Candidate } from '../api/clients'
-import { CostMeter, combinePlans, fetchHotels, fetchOfficialInfo, regenerateDay } from '../lib/generate'
+import { CostMeter, chooseLodging, combinePlans, fetchHotels, fetchOfficialInfo, regenerateDay } from '../lib/generate'
 import { remember, useLive } from '../lib/live'
-import { PACE_LIMITS, nameOf, scheduleAndValidate } from '../lib/schedule'
-import { fmtDate } from '../lib/time'
-import { bookingLinks } from '../lib/transit'
-import type { Conditions, Day, Leg, Plan, Stop, Trip } from '../types'
+import { CHECKIN_BY, PACE_LIMITS, coordOf, nameOf, scheduleAndValidate, showTime } from '../lib/schedule'
+import { fmtDate, fromMin, toMin } from '../lib/time'
+import { bookingLinks, transitLinks } from '../lib/transit'
+import { normalizeConditions, type Conditions, type Day, type LatLng, type Leg, type MapArea, type Plan, type Stop, type Trip } from '../types'
 import { GoogleRouteMap, PLAN_COLORS } from './Maps'
 
-const KIND: Record<Stop['kind'], string> = { sight: '名所', meal: '食事', cafe: 'カフェ', shop: '買い物', other: 'その他' }
-const LEGMODE: Record<Leg['mode'], string> = { walk: '徒歩', car: '車', train: '電車' }
+const KIND: Record<Stop['kind'], string> = { sight: '名所', meal: '食事', cafe: 'カフェ', shop: '買い物', other: 'その他', lodging: '宿' }
+const LEGMODE: Record<Leg['mode'], string> = { walk: '徒歩', car: '車', train: '公共交通' }
 
 export default function TripView({ tripId, onBack, onRegenerate }: { tripId: string; onBack: () => void; onRegenerate: (c: Conditions, name: string) => void }) {
   const [trip, setTrip] = useState<Trip | null>(null)
@@ -18,7 +18,7 @@ export default function TripView({ tripId, onBack, onRegenerate }: { tripId: str
   const [busy, setBusy] = useState('')
   const [note, setNote] = useState('')
 
-  useEffect(() => { getTrip(tripId).then(t => { if (t) { setTrip(t); setSel(t.adoptedPlanId ?? t.plans[0]?.id ?? '') } }) }, [tripId])
+  useEffect(() => { getTrip(tripId).then(t => { if (t) { t = { ...t, conditions: normalizeConditions(t.conditions) }; setTrip(t); setSel(t.adoptedPlanId ?? t.plans[0]?.id ?? '') } }) }, [tripId])
 
   const persist = useCallback(async (t: Trip) => { await saveTrip(t); setTrip({ ...t }) }, [])
   const replacePlan = useCallback(async (p: Plan) => { if (!trip) return; await persist({ ...trip, plans: trip.plans.map(x => (x.id === p.id ? p : x)) }) }, [trip, persist])
@@ -74,12 +74,12 @@ export default function TripView({ tripId, onBack, onRegenerate }: { tripId: str
         onOfficial={() => run('公式サイトを確認しています', async (m, pr) => { const s = await getSettings(); await replacePlan(await fetchOfficialInfo(s, plan, m, pr)) })}
         onHotels={() => run('宿を探しています', async (m, pr) => {
           const s = await getSettings()
-          await replacePlan(await fetchHotels(s, plan, c.adults ?? 1, m, pr))
+          await replacePlan(await scheduleAndValidate(s, c, await fetchHotels(s, plan, c, m, pr)))
         })}
         onRegenDay={i => run(`${i + 1}日目を作り直しています`, async (m, pr) => {
-          const s = await getSettings(); const area = await getArea(c.areaId!)
-          if (!area) throw new Error('範囲が見つかりません')
-          await replacePlan(await regenerateDay(s, trip, plan, i, area, m, pr))
+          const s = await getSettings(); const areas = (await listAreas()).filter(a => c.areaIds.includes(a.id))
+          if (!areas.length) throw new Error('範囲が見つかりません')
+          await replacePlan(await regenerateDay(s, trip, plan, i, areas, m, pr))
         })}
         onRegenerate={cc => onRegenerate(cc, trip.name)}
         onDelete={async () => { if (confirm(`「${plan.angle}」を削除しますか`)) { const plans = trip.plans.filter(x => x.id !== plan.id); await persist({ ...trip, plans, adoptedPlanId: trip.adoptedPlanId === plan.id ? null : trip.adoptedPlanId }); setSel(plans[0]?.id ?? '') } }}
@@ -96,6 +96,8 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
   onRegenDay: (i: number) => void; onRegenerate: (c: Conditions) => void; onDelete: () => void
 }) {
   const [di, setDi] = useState(0)
+  const [areas, setAreas] = useState<MapArea[]>([])
+  useEffect(() => { listAreas().then(a => setAreas(a.filter(x => trip.conditions.areaIds.includes(x.id)))) }, [trip.conditions.areaIds])
   const day = plan.days[Math.min(di, plan.days.length - 1)]
   const c = trip.conditions
   const editStops = (fn: (stops: Stop[]) => Stop[]) => onChange({ ...plan, days: plan.days.map((d, i) => (i === di ? { ...d, stops: fn([...d.stops]) } : d)) })
@@ -108,6 +110,7 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
         {trip.adoptedPlanId !== plan.id && <button className="primary" onClick={onAdopt}>この案を採用</button>}
         <button disabled={busy} onClick={onOfficial}>公式サイトの情報を取得</button>
         <button disabled={busy} onClick={onHotels}>宿を探す</button>
+        <button onClick={() => window.print()}>印刷・PDFで保存</button>
         <button className="ghost" onClick={onDelete}>案を削除</button>
       </div>
 
@@ -118,7 +121,8 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
       <p className="note">移動{day.moveMinutes}分・徒歩{(day.walkMeters / 1000).toFixed(1)}km・空き{day.slackMinutes}分{day.lodgingArea && `・宿泊エリア：${day.lodgingArea}`}</p>
 
       <ol className="timeline">
-        <li className="tl-start"><b>{day.startTime}</b> 出発：{day.startPoint.label}</li>
+        {di === 0 && c.home && c.origin && <li className="tl-leg">自宅（{c.home}）から {c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={day.startTime} byArrival /> <span className="note">（{day.startTime}に着く便を探す）</span></li>}
+        <li className="tl-start"><b>{day.startTime}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}</li>
         {day.stops.map((st, i) => (
           <StopItem key={st.id} stop={st} leg={day.legs[i]} index={i} count={day.stops.length} dayIssues={plan.issues.filter(x => x.stopId === st.id)}
             onPin={() => editStops(ss => ss.map(x => (x.id === st.id ? { ...x, pinned: !x.pinned } : x)))}
@@ -126,11 +130,19 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
             onRemove={() => editStops(ss => ss.filter(x => x.id !== st.id))}
             onStay={m => editStops(ss => ss.map(x => (x.id === st.id ? { ...x, stayMin: Math.max(15, x.stayMin + m) } : x)))}
             onReplace={cand => { remember(cand); editStops(ss => ss.map(x => (x.id === st.id ? { ...x, placeId: cand.id, official: undefined, googleCoord: { ...cand.location, fetchedAt: new Date().toISOString() } } : x))) }}
-            areaId={c.areaId!}
+            onTransit={tin => editStops(ss => ss.map(x => (x.id === st.id ? { ...x, transitIn: tin } : x)))}
+            center={coordOf(st) ?? areas[0]?.center}
           />
         ))}
+        {day.lodging && <>
+          {day.lodgingLeg && <li className="tl-leg"><LegLine leg={day.lodgingLeg} /> <TransitInput value={day.lodging.transitIn} show={day.lodgingLeg.mode === 'train'} onChange={tin => onChange({ ...plan, days: plan.days.map((d, i) => (i === di ? { ...d, lodging: { ...d.lodging!, transitIn: tin } } : d)) })} /></li>}
+          <li className="tl-stop lodging"><div className="stop-head"><b>{showTime(day.lodging.arrive, day.lodging.approx)}</b><span className="kind">宿</span><span className="stop-name">{nameOf(day.lodging)}</span>{day.lodging.pinned && <span className="badge">固定</span>}</div>
+            <p className="note">{CHECKIN_BY}までに着く想定。下の「宿の候補」から変えられます</p></li>
+        </>}
+        {!day.lodging && di < plan.days.length - 1 && <li className="tl-end">宿：未定（「宿を探す」で選べます）</li>}
         {day.returnLeg && <li className="tl-leg"><LegLine leg={day.returnLeg} /></li>}
-        <li className="tl-end"><b>{day.endTime}</b> 終了予定（{c.origin && di === plan.days.length - 1 ? `${c.origin.label}へ` : day.lodgingArea ?? '宿へ'}）</li>
+        {di === plan.days.length - 1 && <li className="tl-end"><b>{showTime(fromMin(toMin(day.endTime) - day.slackMinutes), day.returnApprox)}</b> {c.origin?.label ?? '終点'} 着（{day.endTime}発の予定）</li>}
+        {di === plan.days.length - 1 && c.home && c.origin && <li className="tl-leg">{c.origin.label} から自宅へ：<TransitLinks from={c.origin.label} to={c.home} date={day.date} time={day.endTime} /></li>}
       </ol>
       <div className="row"><button disabled={busy} onClick={() => onRegenDay(di)}>この日だけ作り直す（固定した場所は残す）</button></div>
 
@@ -138,31 +150,32 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
 
       <GoogleRouteMap routes={routes} />
 
-      {di < plan.days.length - 1 && <Hotels day={day} next={plan.days[di + 1]} adults={c.adults ?? 1} />}
+      <PrintPlan trip={trip} plan={plan} />
+      {di < plan.days.length - 1 && <Hotels day={day} next={plan.days[di + 1]} adults={c.adults ?? 1} onPick={h => onChange(chooseLodging(plan, di, h))} />}
     </div>
   )
 }
 
 function LegLine({ leg }: { leg: Leg }) {
-  return <span className="leg">{LEGMODE[leg.mode]} {leg.minutes}分{leg.meters ? `・${(leg.meters / 1000).toFixed(1)}km` : ''}
+  return <span className="leg">{LEGMODE[leg.mode]} {leg.estimated ? '約' : ''}{leg.minutes}分{leg.meters ? `・${(leg.meters / 1000).toFixed(1)}km` : ''}
     {leg.estimated && <span className="badge warn">推定</span>}
     {leg.transitLinks?.map(l => <a key={l.url} href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}
   </span>
 }
 
-function StopItem({ stop, leg, index, count, dayIssues, onPin, onMove, onRemove, onStay, onReplace, areaId }: {
+function StopItem({ stop, leg, index, count, dayIssues, onPin, onMove, onRemove, onStay, onReplace, onTransit, center }: {
   stop: Stop; leg?: Leg; index: number; count: number; dayIssues: { text: string }[]
-  onPin: () => void; onMove: (d: number) => void; onRemove: () => void; onStay: (m: number) => void; onReplace: (c: Candidate) => void; areaId: string
+  onPin: () => void; onMove: (d: number) => void; onRemove: () => void; onStay: (m: number) => void; onReplace: (c: Candidate) => void; onTransit: (t: Stop['transitIn']) => void; center?: LatLng
 }) {
   const live = useLive(stop.placeId)
   const [open, setOpen] = useState(false)
   const [rep, setRep] = useState(false)
   const o = stop.official
   return <>
-    {leg && <li className="tl-leg"><LegLine leg={leg} /></li>}
+    {leg && <li className="tl-leg"><LegLine leg={leg} /> <TransitInput value={stop.transitIn} show={leg.mode === 'train'} onChange={onTransit} /></li>}
     <li className={`tl-stop ${dayIssues.length ? 'has-issue' : ''}`}>
       <div className="stop-head" onClick={() => setOpen(!open)}>
-        <b>{stop.arrive}–{stop.depart}</b>
+        <b>{showTime(stop.arrive, stop.approx)}–{showTime(stop.depart, stop.approx)}</b>
         <span className="kind">{KIND[stop.kind]}</span>
         <span className="stop-name">{nameOf(stop)}</span>
         {stop.pinned && <span className="badge">固定</span>}
@@ -187,22 +200,21 @@ function StopItem({ stop, leg, index, count, dayIssues, onPin, onMove, onRemove,
           <button onClick={() => setRep(!rep)}>入れ替え</button>
           <button className="ghost" onClick={onRemove}>外す</button>
         </div>
-        {rep && <ReplaceSearch areaId={areaId} onPick={c => { setRep(false); onReplace(c) }} />}
+        {rep && center && <ReplaceSearch center={center} onPick={c => { setRep(false); onReplace(c) }} />}
       </div>}
     </li>
   </>
 }
 
-function ReplaceSearch({ areaId, onPick }: { areaId: string; onPick: (c: Candidate) => void }) {
+function ReplaceSearch({ center, onPick }: { center: LatLng; onPick: (c: Candidate) => void }) {
   const [q, setQ] = useState('')
   const [res, setRes] = useState<Candidate[]>([])
   const [err, setErr] = useState('')
   async function search() {
     setErr('')
     try {
-      const s = await getSettings(); const a = await getArea(areaId)
-      if (!a) return
-      const r = await placesCandidates(s, q, a.center, a.radiusKm * 1000, 8)
+      const s = await getSettings()
+      const r = await placesCandidates(s, q, center, 10000, 8)
       r.forEach(remember); setRes(r)
     } catch (e) { setErr((e as Error).message) }
   }
@@ -214,9 +226,48 @@ function ReplaceSearch({ areaId, onPick }: { areaId: string; onPick: (c: Candida
   </div>
 }
 
+function TransitLinks({ from, to, date, time, byArrival }: { from: string; to: string; date: string; time: string; byArrival?: boolean }) {
+  return <>{transitLinks(from, to, { lat: NaN, lng: NaN }, { lat: NaN, lng: NaN }, date, time, byArrival).filter(l => !l.url.includes('NaN')).map(l => <a key={l.url} className="bk" href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}</>
+}
+
+/** 乗換案内で調べた発車・到着時刻を入れる欄。入れるとその先の時刻がそれで計算し直される */
+function TransitInput({ value, show, onChange }: { value?: Stop['transitIn']; show: boolean; onChange: (t: Stop['transitIn']) => void }) {
+  const [open, setOpen] = useState(false)
+  const [dep, setDep] = useState(value?.depart ?? '')
+  const [arr, setArr] = useState(value?.arrive ?? '')
+  if (!show) return null
+  if (!open) return <button className="link small" onClick={() => setOpen(true)}>{value ? `実際の便：${value.depart ?? ''}発→${value.arrive}着（変更）` : '調べた時刻を入れる'}</button>
+  return <span className="tin">
+    <input type="time" value={dep} onChange={e => setDep(e.target.value)} aria-label="発車" />発→
+    <input type="time" value={arr} onChange={e => setArr(e.target.value)} aria-label="到着" />着
+    <button disabled={!arr} onClick={() => { setOpen(false); onChange({ depart: dep || undefined, arrive: arr }) }}>反映</button>
+    {value && <button className="ghost" onClick={() => { setOpen(false); onChange(undefined) }}>消す</button>}
+  </span>
+}
+
+/** 印刷用（画面では非表示）。圏外に備えて、全日程を1枚にまとめて紙やPDFにする */
+function PrintPlan({ trip, plan }: { trip: Trip; plan: Plan }) {
+  const c = trip.conditions
+  return <div className="print-only">
+    <h1>{trip.name}（{plan.angle}）</h1>
+    {plan.days.map((d, i) => <div key={d.date} className="print-day">
+      <h2>{i + 1}日目 {fmtDate(d.date)}</h2>
+      <table><tbody>
+        {i === 0 && c.home && <tr><td></td><td>自宅（{c.home}）→ {d.startPoint.label}（乗換案内で確認）</td></tr>}
+        <tr><td>{d.startTime}</td><td>{i === 0 ? '着' : '出発'}：{d.startPoint.label}</td></tr>
+        {d.stops.map((st, j) => <tr key={st.id}><td>{showTime(st.arrive, st.approx)}</td><td>{d.legs[j] ? `（${LEGMODE[d.legs[j].mode]} ${d.legs[j].estimated ? '約' : ''}${d.legs[j].minutes}分${st.transitIn ? `・${st.transitIn.depart ?? ''}発→${st.transitIn.arrive}着` : ''}）` : ''} <b>{nameOf(st)}</b>（{st.stayMin}分）{st.official?.hours ? `　営業：${st.official.hours}` : ''}</td></tr>)}
+        {d.lodging && <tr><td>{showTime(d.lodging.arrive, d.lodging.approx)}</td><td>宿：<b>{nameOf(d.lodging)}</b></td></tr>}
+        {i === plan.days.length - 1 && <tr><td>{d.endTime}</td><td>{c.origin?.label ?? ''} 発{c.home ? ` → 自宅（${c.home}）` : ''}</td></tr>}
+      </tbody></table>
+      {d.rainPlan && <p>雨の日：{d.rainPlan}</p>}
+    </div>)}
+    <p className="note">「頃」の付いた時刻は推定です。電車・バスは乗換案内で確認してください。</p>
+  </div>
+}
+
 // ---------------- 宿 ----------------
 
-function Hotels({ day, next, adults }: { day: Day; next: Day; adults: number }) {
+function Hotels({ day, next, adults, onPick }: { day: Day; next: Day; adults: number; onPick: (h: Candidate) => void }) {
   const google = day.hotels.filter(h => h.source === 'google')
   const rakuten = day.hotels.filter(h => h.source === 'rakuten')
   const areaWord = day.lodgingArea ?? '宿泊エリア'
@@ -224,7 +275,7 @@ function Hotels({ day, next, adults }: { day: Day; next: Day; adults: number }) 
     <h3>宿の候補（{fmtDate(day.date)}泊）</h3>
     {!day.hotelsFetchedAt && <p className="note">「宿を探す」で、この日の最後の立ち寄り先から3km以内の宿を探します</p>}
     {day.hotelsFetchedAt && google.length === 0 && rakuten.length === 0 && <p className="note">宿が見つかりませんでした（半径3km）</p>}
-    {google.length > 0 && <ul className="list hotels">{google.map(h => <GoogleHotel key={h.placeId} placeId={h.placeId!} checkin={day.date} checkout={next.date} adults={adults} />)}</ul>}
+    {google.length > 0 && <ul className="list hotels">{google.map(h => <GoogleHotel key={h.placeId} placeId={h.placeId!} checkin={day.date} checkout={next.date} adults={adults} chosen={day.lodging?.placeId === h.placeId} onPick={onPick} />)}</ul>}
     {google.length > 0 && <p className="note">情報：Google Maps。空室と料金は各予約サイトで確認してください。</p>}
     {rakuten.length > 0 && <>
       <h3>楽天トラベルの空室</h3>
@@ -236,11 +287,11 @@ function Hotels({ day, next, adults }: { day: Day; next: Day; adults: number }) 
   </div>
 }
 
-function GoogleHotel({ placeId, checkin, checkout, adults }: { placeId: string; checkin: string; checkout: string; adults: number }) {
+function GoogleHotel({ placeId, checkin, checkout, adults, chosen, onPick }: { placeId: string; checkin: string; checkout: string; adults: number; chosen: boolean; onPick: (h: Candidate) => void }) {
   const live = useLive(placeId)
   if (!live) return <li className="note">（宿の情報はオンライン時に表示します）</li>
   return <li className="hotel">
-    <div><b>{live.name}</b> <span className="note">{live.typeLabel ?? ''}{live.rating ? `・評価${live.rating}（${live.ratingCount}件）` : ''}{live.priceLevel ? `・${PRICE[live.priceLevel] ?? ''}` : ''}</span></div>
+    <div><b>{live.name}</b> {chosen ? <span className="badge">この宿で計画中</span> : <button className="link small" onClick={() => onPick(live)}>ここに泊まる</button>} <span className="note">{live.typeLabel ?? ''}{live.rating ? `・評価${live.rating}（${live.ratingCount}件）` : ''}{live.priceLevel ? `・${PRICE[live.priceLevel] ?? ''}` : ''}</span></div>
     <div className="note">{bookingLinks(live.name, checkin, checkout, adults).map(l => <a key={l.url} className="bk" href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}<a className="bk" href={live.mapsUri ?? `https://www.google.com/maps/place/?q=place_id:${placeId}`} target="_blank" rel="noreferrer">Googleマップ</a></div>
   </li>
 }

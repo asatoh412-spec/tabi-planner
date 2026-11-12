@@ -51,6 +51,11 @@ export async function purgeExpiredGoogleCoords() {
     for (const p of t.plans) for (const d of p.days) for (const s of d.stops) {
       if (s.googleCoord && Date.parse(s.googleCoord.fetchedAt) < limit) { delete s.googleCoord; changed = true }
     }
+    for (const p of t.plans) for (const d of p.days) {
+      if (d.startPoint.fetchedAt && Date.parse(d.startPoint.fetchedAt) < limit) { d.startPoint = { label: d.startPoint.label, lat: NaN, lng: NaN }; changed = true }
+    }
+    const o = t.conditions.origin
+    if (o?.source === 'google' && o.fetchedAt && Date.parse(o.fetchedAt) < limit) { t.conditions.origin = { ...o, coord: { lat: NaN, lng: NaN }, fetchedAt: undefined }; changed = true }
     if (changed) await db.put('trips', t)
   }
 }

@@ -124,6 +124,18 @@ export async function placesCandidates(s: Settings, query: string, center: LatLn
   return ((j.places ?? []) as RawPlace[]).map(toCandidate)
 }
 
+/** 駅名・施設名で地点を探す（出発地点用。Pro料金：月5,000件まで無料） */
+export async function placesLocate(s: Settings, query: string, center: LatLng, radiusM: number) {
+  const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': s.googleKey, 'X-Goog-FieldMask': 'places.id,places.displayName,places.location,places.formattedAddress' },
+    body: JSON.stringify({ textQuery: query, languageCode: 'ja', regionCode: 'JP', pageSize: 5, locationBias: { circle: { center: { latitude: center.lat, longitude: center.lng }, radius: Math.min(50000, radiusM) } } }),
+  })
+  const j = await r.json()
+  if (!r.ok) throw new Error(`Places HTTP ${r.status}: ${j?.error?.message ?? ''}`)
+  return ((j.places ?? []) as RawPlace[]).map(toCandidate)
+}
+
 /** 1か所の詳細（表示用。保存しない） */
 export async function placeDetails(s: Settings, placeId: string, mask = 'id,displayName,location,formattedAddress,regularOpeningHours,rating,userRatingCount,googleMapsUri,primaryTypeDisplayName,priceLevel'): Promise<Candidate> {
   const r = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=ja`, {

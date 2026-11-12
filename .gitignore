@@ -2,3 +2,12 @@ node_modules
 dist
 *.local
 .DS_Store
+
+# 自動アップロード（作業の場からの受け渡し）
+push-request.txt
+auto-push.log
+*.tar.gz
+*.new/
+root.new/
+自動アップロード/run-hidden.vbs
+Claude outputs/

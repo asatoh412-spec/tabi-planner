@@ -1,9 +1,10 @@
 import { claudeJSON, gsiGeocode, placesCandidates, rakutenVacant, type Candidate, type ClaudeUsage } from '../api/clients'
 import { newId } from '../db'
-import type { Conditions, Day, EventInfo, HotelCandidate, MapArea, OfficialInfo, Plan, Settings, Stop, StopKind, Trip } from '../types'
+import type { Conditions, Day, EventInfo, HotelCandidate, LatLng, MapArea, OfficialInfo, Plan, Settings, Stop, StopKind, Trip } from '../types'
 import { peek, remember } from './live'
 import { PACE_LIMITS, apiCount, coordOf, nameOf, scheduleAndValidate } from './schedule'
 import { addDays, daysBetween, dow, today } from './time'
+import { distanceKm, ensureOrigin } from './geo'
 
 export type Progress = (msg: string) => void
 
@@ -25,32 +26,84 @@ export class CostMeter {
 
 export interface CandidatePool { all: Candidate[]; wishPlace: Record<string, Candidate | undefined> }
 
-export async function gatherCandidates(s: Settings, c: Conditions, area: MapArea, meter: CostMeter, progress: Progress): Promise<CandidatePool> {
-  const r = area.radiusKm * 1000
+export async function gatherCandidates(s: Settings, c: Conditions, areas: MapArea[], meter: CostMeter, progress: Progress): Promise<CandidatePool> {
   const pool = new Map<string, Candidate>()
   const wishPlace: Record<string, Candidate | undefined> = {}
   const add = (cs: Candidate[]) => cs.forEach(x => { pool.set(x.id, x); remember(x) })
-  const q = async (text: string, max: number) => { meter.places++; return placesCandidates(s, text, area.center, r, max) }
+  const q = async (a: MapArea, text: string, max: number) => { meter.places++; return placesCandidates(s, text, a.center, a.radiusKm * 1000, max) }
+  const main = areas[0]
 
+  // 必須・できれば：どの範囲にあるか分からないので、範囲ごとに探して一番近いものを採る
   for (const w of c.wishes.filter(w => w.priority === 'must' || w.priority === 'want')) {
     progress(`「${w.text}」を探しています`)
-    const cs = await q(w.text, 3)
-    const hit = (w.placeId && cs.find(x => x.id === w.placeId)) || cs[0]
+    let hit: Candidate | undefined
+    for (const a of areas) {
+      const cs = await q(a, w.text, 3)
+      hit = (w.placeId && cs.find(x => x.id === w.placeId)) || hit || cs[0]
+      if (hit && distanceKm(hit.location, a.center) <= a.radiusKm) break
+    }
     wishPlace[w.id] = hit
     if (hit) { w.placeId = hit.id; add([hit]) }
   }
-  for (const w of c.wishes.filter(w => w.priority === 'auto')) {
-    progress(`テーマ「${w.text}」の候補を探しています`)
-    add(await q(w.text, 8))
+  for (const a of areas) {
+    for (const w of c.wishes.filter(w => w.priority === 'auto')) {
+      progress(`${a.name}：テーマ「${w.text}」の候補を探しています`)
+      add(await q(a, `${w.text} ${a.name}`, 6))
+    }
+    progress(`${a.name}：食事と名所の候補を探しています`)
+    add(await q(a, c.food ? `${c.food} ${a.name}` : `${a.name} 郷土料理`, 6))
+    add(await q(a, `${a.name} カフェ`, 3))
+    add(await q(a, `${a.name} 観光名所`, areas.length > 1 ? 10 : 15))
   }
-  progress('食事の候補を探しています')
-  add(await q(c.food ? `${c.food} ${area.name}` : `${area.name} 郷土料理`, 8))
-  add(await q(`${area.name} カフェ`, 4))
-  if (pool.size < 25) { progress('名所の候補を探しています'); add(await q(`${area.name} 観光名所`, 15)) }
+  void main
 
   const ex = c.wishes.filter(w => w.priority === 'exclude').map(w => w.text.trim()).filter(Boolean)
   const keep = [...pool.values()].filter(x => !ex.some(e => x.name.includes(e) || (x.typeLabel ?? '').includes(e)))
   return { all: keep, wishPlace }
+}
+
+// ---------- 宿（Google Places の宿泊施設。予定の各日の最後に置く） ----------
+
+const lodgingCache = new Map<string, Candidate[]>()
+
+export async function lodgingCandidates(s: Settings, c: Conditions, near: LatLng, area: string | undefined, meter: CostMeter): Promise<Candidate[]> {
+  const key = `${near.lat.toFixed(3)},${near.lng.toFixed(3)}|${area ?? ''}|${c.lodging ?? ''}`
+  if (!lodgingCache.has(key)) {
+    meter.places++
+    const cs = await placesCandidates(s, `${c.lodging ?? ''} ${area ?? ''} ホテル 旅館`.trim(), near, 8000, 8, 'lodging')
+    cs.forEach(remember)
+    lodgingCache.set(key, cs)
+  }
+  return lodgingCache.get(key)!
+}
+
+const lodgingStop = (h: Candidate, prev?: Stop): Stop => ({
+  id: prev?.placeId === h.id ? prev.id : newId(), placeId: h.id, stayMin: 0, kind: 'lodging', pinned: prev?.placeId === h.id ? prev.pinned : false,
+  googleCoord: { ...h.location, fetchedAt: new Date().toISOString() },
+})
+
+/** 最終日以外の各日に宿を置く。固定した宿はそのまま。評価が高く、件数の多いものを選ぶ */
+export async function assignLodging(s: Settings, c: Conditions, plan: Plan, meter: CostMeter, progress: Progress): Promise<Plan> {
+  const days = [...plan.days]
+  const now = new Date().toISOString()
+  for (let i = 0; i < days.length - 1; i++) {
+    const d = days[i]
+    const last = d.stops.at(-1)
+    const near = last && coordOf(last)
+    if (!near) continue
+    progress(`${i + 1}日目の宿を選んでいます`)
+    const cs = await lodgingCandidates(s, c, near, d.lodgingArea, meter)
+    const hotels: HotelCandidate[] = cs.map(h => ({ source: 'google', placeId: h.id, fetchedAt: now }))
+    if (d.lodging?.pinned) { days[i] = { ...d, hotels, hotelsFetchedAt: now }; continue }
+    const best = [...cs].sort((a, b) => score(b) - score(a))[0]
+    days[i] = { ...d, hotels, hotelsFetchedAt: now, lodging: best ? lodgingStop(best, d.lodging) : undefined }
+  }
+  return { ...plan, days }
+}
+const score = (h: Candidate) => (h.rating ?? 3) + Math.log10((h.ratingCount ?? 0) + 1) * 0.3
+
+export function chooseLodging(plan: Plan, dayIndex: number, h: Candidate): Plan {
+  return { ...plan, days: plan.days.map((d, i) => (i === dayIndex ? { ...d, lodging: { ...lodgingStop(h, d.lodging), pinned: true } } : d)) }
 }
 
 // ---------- Claude による組み立て ----------
@@ -64,6 +117,9 @@ const SYSTEM = `あなたは国内旅行の行程を組み立てる担当です�
 - 1日の立ち寄り数（食事を除く）はペースの上限以内。昼食は11:30〜13:30、夕食は18:00〜20:00ごろに1回ずつ（その日の時間帯に含まれる場合のみ）
 - 営業時間（曜日別）に合う順番にし、座標を見て移動が往復にならない順に並べる
 - 電車の時刻・運賃は書かない
+- 範囲が複数ある場合は、日ごとに回る範囲をまとめ、範囲の間の移動は1日1回程度にする
+- 最終日以外は、その日の最後にアプリが lodgingArea の近くの宿を置く。宿へは19:00までに着けるよう、最後の立ち寄り先を lodgingArea の近くにする
+- 初日は玄関口（到着駅など）から始まり、最終日は玄関口に戻って終わる
 - rainPlan は雨天時の代案を1〜2文（候補の名前を使ってよい）。lodgingArea は宿泊に向いたエリア名（最終日は不要）
 - 出力はJSONのみ：{"days":[{"date":"YYYY-MM-DD","stops":[{"id":"候補id","stayMin":60,"kind":"sight|meal|cafe|shop|other"}],"lodgingArea":"","rainPlan":""}]}`
 
@@ -75,13 +131,14 @@ function describeCandidates(pool: Candidate[], dates: string[]) {
   }).join('\n')
 }
 
-function describeConditions(c: Conditions, days: Day[], pool: CandidatePool, angle: string) {
+function describeConditions(c: Conditions, days: Day[], pool: CandidatePool, angle: string, areas: MapArea[]) {
   const pace = PACE_LIMITS[c.pace ?? 'standard']
   const w = (p: string) => c.wishes.filter(x => x.priority === p)
   const lines = [
     `観点：${angle}`,
     `日程：${days.map(d => `${d.date} ${d.startTime}〜${d.endTime}`).join('、')}`,
-    `初日の出発地点：${days[0].startPoint.label}（${days[0].startPoint.lat.toFixed(4)},${days[0].startPoint.lng.toFixed(4)}）`,
+    `範囲：${areas.map(a => `${a.name}（中心 ${a.center.lat.toFixed(3)},${a.center.lng.toFixed(3)}、半径${a.radiusKm}km）`).join('、')}`,
+    `玄関口（初日の到着・最終日の出発）：${days[0].startPoint.label}（${days[0].startPoint.lat.toFixed(4)},${days[0].startPoint.lng.toFixed(4)}）`,
     `移動手段：${{ train: '電車中心', car: '車', walk_transit: '徒歩と公共交通' }[c.mode ?? 'walk_transit']}`,
     `ペース：${pace.label}（立ち寄り上限${pace.stops}か所、歩行上限${pace.walkKm}km）`,
     `必須：${w('must').map(x => `${x.text}${pool.wishPlace[x.id] ? `(id=${pool.wishPlace[x.id]!.id})` : '(候補なし)'}`).join('、') || 'なし'}`,
@@ -93,12 +150,13 @@ function describeConditions(c: Conditions, days: Day[], pool: CandidatePool, ang
   return lines.join('\n')
 }
 
-export function buildDaySkeletons(c: Conditions, area: MapArea): Day[] {
+export function buildDaySkeletons(c: Conditions, areas: MapArea[]): Day[] {
+  const area = areas[0]
   const startDate = c.start?.slice(0, 10) ?? addDays(today(), 7)
   const endDate = c.end?.slice(0, 10) ?? startDate
   const dates = daysBetween(startDate, endDate < startDate ? startDate : endDate)
   const relaxed = c.pace === 'relaxed'
-  const origin = c.origin ? { ...c.origin.coord, label: c.origin.label } : { ...area.center, label: `${area.name}（範囲の中心）` }
+  const origin = c.origin ? { ...c.origin.coord, label: c.origin.label, fetchedAt: c.origin.fetchedAt } : { ...area.center, label: `${area.name}（範囲の中心）` }
   return dates.map((date, i) => ({
     date,
     startTime: i === 0 && c.start ? c.start.slice(11, 16) : relaxed ? '10:00' : '09:00',
@@ -120,7 +178,8 @@ function draftToPlan(draft: Draft, skeleton: Day[], angle: string, pool: Candida
         googleCoord: live ? { ...live.location, fetchedAt: new Date().toISOString() } : prev?.googleCoord,
       }
     })
-    return { ...sk, stops, lodgingArea: dd?.lodgingArea, rainPlan: dd?.rainPlan }
+    const keptLodging = keepPinned?.days.find(d => d.date === sk.date)?.lodging
+    return { ...sk, stops, lodgingArea: dd?.lodgingArea, rainPlan: dd?.rainPlan, lodging: keptLodging?.pinned ? keptLodging : undefined }
   })
   return { id: newId(), angle, days, issues: [], status: 'ok', attempts: 0, createdAt: new Date().toISOString(), wishHits: {} }
 }
@@ -130,14 +189,16 @@ function planToDraft(p: Plan): Draft {
 }
 
 /** 1案を作る：組み立て→計算→検証→（破綻があれば）組み直し を上限回数まで */
-export async function generatePlan(s: Settings, c: Conditions, area: MapArea, pool: CandidatePool, angle: string, meter: CostMeter, progress: Progress): Promise<Plan> {
-  const skeleton = buildDaySkeletons(c, area)
-  const base = `${describeConditions(c, skeleton, pool, angle)}\n\n候補（id | 名前 | 種類 | 評価(件数) | 緯度,経度 | 該当曜日の営業時間）：\n${describeCandidates(pool.all, skeleton.map(d => d.date))}`
+export async function generatePlan(s: Settings, c: Conditions, areas: MapArea[], pool: CandidatePool, angle: string, meter: CostMeter, progress: Progress): Promise<Plan> {
+  await ensureOrigin(s, c)
+  const skeleton = buildDaySkeletons(c, areas)
+  const base = `${describeConditions(c, skeleton, pool, angle, areas)}\n\n候補（id | 名前 | 種類 | 評価(件数) | 緯度,経度 | 該当曜日の営業時間）：\n${describeCandidates(pool.all, skeleton.map(d => d.date))}`
   progress(`「${angle}」の案を組み立てています`)
   let res = await claudeJSON<Draft>(s, SYSTEM, base)
   meter.add(res.usage)
   let plan = draftToPlan(res.data, skeleton, angle, pool.all)
   for (let attempt = 0; ; attempt++) {
+    plan = await assignLodging(s, c, plan, meter, progress)
     progress(`「${angle}」の移動時間と営業時間を確認しています（${attempt + 1}回目）`)
     plan = await scheduleAndValidate(s, c, plan)
     plan.attempts = attempt + 1
@@ -151,22 +212,23 @@ export async function generatePlan(s: Settings, c: Conditions, area: MapArea, po
 }
 
 /** 指定した1日だけ作り直す（固定した立ち寄り先は残す） */
-export async function regenerateDay(s: Settings, trip: Trip, plan: Plan, dayIndex: number, area: MapArea, meter: CostMeter, progress: Progress): Promise<Plan> {
+export async function regenerateDay(s: Settings, trip: Trip, plan: Plan, dayIndex: number, areas: MapArea[], meter: CostMeter, progress: Progress): Promise<Plan> {
   const c = trip.conditions
-  const pool = await gatherCandidates(s, c, area, meter, progress)
+  const pool = await gatherCandidates(s, c, areas, meter, progress)
   const day = plan.days[dayIndex]
   const others = new Set(plan.days.filter((_, i) => i !== dayIndex).flatMap(d => d.stops.map(x => x.placeId)))
   const pinned = day.stops.filter(x => x.pinned)
   pinned.forEach(p => { const l = peek(p.placeId); if (l && !pool.all.some(x => x.id === l.id)) pool.all.push(l) })
   const cands = pool.all.filter(x => !others.has(x.id))
-  const prompt = `${describeConditions(c, [day], pool, plan.angle)}\n\nこの日（${day.date} ${day.startTime}〜${day.endTime}、出発地点 ${day.startPoint.label}）だけを作り直します。\n固定（必ず残す。順番は変えてよい）：${pinned.map(p => `id=${p.placeId} ${nameOf(p)}`).join('、') || 'なし'}\n他の日に入っている場所は使わない。\n\n候補：\n${describeCandidates(cands, [day.date])}\n\n出力は {"days":[1日分]} の形式で。`
+  const prompt = `${describeConditions(c, [day], pool, plan.angle, areas)}\n\nこの日（${day.date} ${day.startTime}〜${day.endTime}、出発地点 ${day.startPoint.label}）だけを作り直します。\n固定（必ず残す。順番は変えてよい）：${pinned.map(p => `id=${p.placeId} ${nameOf(p)}`).join('、') || 'なし'}\n他の日に入っている場所は使わない。\n\n候補：\n${describeCandidates(cands, [day.date])}\n\n出力は {"days":[1日分]} の形式で。`
   progress(`${dayIndex + 1}日目を作り直しています`)
   const res = await claudeJSON<Draft>(s, SYSTEM, prompt)
   meter.add(res.usage)
   const one = draftToPlan(res.data, [day], plan.angle, cands, plan)
-  const days = plan.days.map((d, i) => (i === dayIndex ? { ...one.days[0], hotels: d.hotels, hotelsFetchedAt: d.hotelsFetchedAt } : d))
+  const days = plan.days.map((d, i) => (i === dayIndex ? { ...one.days[0], hotels: d.hotels, hotelsFetchedAt: d.hotelsFetchedAt, lodging: d.lodging?.pinned ? d.lodging : undefined } : d))
+  const withLodging = await assignLodging(s, c, { ...plan, days }, meter, progress)
   progress('移動時間と営業時間を確認しています')
-  return scheduleAndValidate(s, c, { ...plan, days })
+  return scheduleAndValidate(s, c, withLodging)
 }
 
 /** 日ごとに別の案を選んで1つにまとめ、つなぎ目を検証し直す */
@@ -185,11 +247,11 @@ export async function combinePlans(s: Settings, trip: Trip, picks: string[]): Pr
 
 // ---------- 見頃・イベント（ウェブ検索、出典付き） ----------
 
-export async function fetchEvents(s: Settings, area: MapArea, c: Conditions, meter: CostMeter): Promise<EventInfo[]> {
+export async function fetchEvents(s: Settings, areas: MapArea[], c: Conditions, meter: CostMeter): Promise<EventInfo[]> {
   const from = c.start?.slice(0, 10) ?? today(), to = c.end?.slice(0, 10) ?? from
   const res = await claudeJSON<{ events: { title: string; period?: string; place?: string; sourceUrl: string }[] }>(s,
     'ウェブ検索で調べた事実だけを書く。記憶から日程を書かない。出典URLが確認できないものは出さない。出力はJSONのみ。',
-    `${area.name}周辺（中心 ${area.center.lat.toFixed(3)},${area.center.lng.toFixed(3)}、半径${area.radiusKm}km）で、${from}〜${to}に見頃の花・紅葉・食材、開催中のイベント・祭り・展覧会を調べてください。日程が今年のものか必ず確認すること。\n{"events":[{"title":"","period":"","place":"","sourceUrl":""}]}`,
+    `${areas.map(area => `${area.name}周辺（中心 ${area.center.lat.toFixed(3)},${area.center.lng.toFixed(3)}、半径${area.radiusKm}km）`).join('、')}で、${from}〜${to}に見頃の花・紅葉・食材、開催中のイベント・祭り・展覧会を調べてください。日程が今年のものか必ず確認すること。\n{"events":[{"title":"","period":"","place":"","sourceUrl":""}]}`,
     { maxSearches: 5, maxTokens: 4000 })
   meter.add(res.usage)
   const now = new Date().toISOString()
@@ -223,28 +285,20 @@ export async function fetchOfficialInfo(s: Settings, plan: Plan, meter: CostMete
 
 // ---------- 宿（Google Places の宿泊施設＋予約サイトへのリンク、楽天キーがあれば空室検索も） ----------
 
-export async function fetchHotels(s: Settings, plan: Plan, adults: number, meter: CostMeter, progress: Progress): Promise<Plan> {
-  const days = [...plan.days]
-  const useRakuten = !!(s.rakutenAppId && s.rakutenAccessKey)
+export async function fetchHotels(s: Settings, plan: Plan, c: Conditions, meter: CostMeter, progress: Progress): Promise<Plan> {
+  const withGoogle = await assignLodging(s, c, plan, meter, progress)
+  if (!(s.rakutenAppId && s.rakutenAccessKey)) return withGoogle
+  const days = [...withGoogle.days]
   for (let i = 0; i < days.length - 1; i++) {
-    const last = days[i].stops.at(-1)
-    const p = last && coordOf(last)
+    const p = (days[i].lodging && coordOf(days[i].lodging!)) || (days[i].stops.at(-1) && coordOf(days[i].stops.at(-1)!))
     if (!p) continue
-    progress(`${i + 1}日目の宿を探しています`)
-    const now = new Date().toISOString()
-    const hotels: HotelCandidate[] = []
-    meter.places++
-    const g = await placesCandidates(s, `${days[i].lodgingArea ?? ''} ホテル 旅館`.trim(), p, 3000, 8, 'lodging')
-    g.forEach(remember)
-    hotels.push(...g.map(h => ({ source: 'google' as const, placeId: h.id, fetchedAt: now })))
-    if (useRakuten) {
-      try {
-        const r = await rakutenVacant(s, p, 3, days[i].date, days[i + 1].date, adults)
-        hotels.push(...r.hotels.slice(0, 8).map(h => ({ source: 'rakuten' as const, hotelNo: h.hotelNo, name: h.hotelName, minCharge: h.hotelMinCharge, url: h.planListUrl ?? h.hotelInformationUrl ?? '', fetchedAt: now })))
-      } catch (e) { progress(`楽天の空室検索に失敗：${(e as Error).message}`) }
-      await new Promise(res => setTimeout(res, 1100)) // 楽天の短時間連続アクセス制限への配慮
-    }
-    days[i] = { ...days[i], hotels, hotelsFetchedAt: now }
+    progress(`${i + 1}日目：楽天トラベルの空室を確認しています`)
+    try {
+      const r = await rakutenVacant(s, p, 3, days[i].date, days[i + 1].date, c.adults ?? 1)
+      const now = new Date().toISOString()
+      days[i] = { ...days[i], hotels: [...days[i].hotels, ...r.hotels.slice(0, 8).map(h => ({ source: 'rakuten' as const, hotelNo: h.hotelNo, name: h.hotelName, minCharge: h.hotelMinCharge, url: h.planListUrl ?? h.hotelInformationUrl ?? '', fetchedAt: now }))] }
+    } catch (e) { progress(`楽天の空室検索に失敗：${(e as Error).message}`) }
+    await new Promise(res => setTimeout(res, 1100)) // 楽天の短時間連続アクセス制限への配慮
   }
-  return { ...plan, days }
+  return { ...withGoogle, days }
 }
