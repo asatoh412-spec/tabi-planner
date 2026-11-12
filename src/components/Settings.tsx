@@ -45,6 +45,19 @@ export default function Settings() {
       <label>Google Maps Platform APIキー<input type="password" value={s.googleKey} onChange={set('googleKey')} autoComplete="off" /></label>
       <label>Claude APIキー<input type="password" value={s.anthropicKey} onChange={set('anthropicKey')} autoComplete="off" /></label>
       <label>Claudeのモデル<input value={s.claudeModel} onChange={set('claudeModel')} /></label>
+      <h2>いつもの条件（新しい旅行の初期値）</h2>
+      <label>自宅（最寄り駅など）<input value={s.home ?? ''} onChange={e => { setS({ ...s, home: e.target.value }); setSaved(false) }} placeholder="例：中野駅" /></label>
+      <label className="check"><input type="checkbox" checked={s.homeTravelBasis ?? true} onChange={e => { setS({ ...s, homeTravelBasis: e.target.checked }); setSaved(false) }} />時刻は「家を出る・家に着く」で入れる</label>
+      <label>いつもの移動手段
+        <select value={s.defaultMode ?? ''} onChange={e => { setS({ ...s, defaultMode: (e.target.value || null) as S['defaultMode'] }); setSaved(false) }}>
+          <option value="">おまかせ</option><option value="train">電車中心</option><option value="car">車</option><option value="walk_transit">徒歩＋公共交通</option>
+        </select></label>
+      <label>いつものペース
+        <select value={s.defaultPace ?? ''} onChange={e => { setS({ ...s, defaultPace: (e.target.value || null) as S['defaultPace'] }); setSaved(false) }}>
+          <option value="">おまかせ</option><option value="relaxed">ゆったり</option><option value="standard">標準</option><option value="packed">詰め込み</option>
+        </select></label>
+      <label>人数<input type="number" min={1} max={10} value={s.defaultAdults ?? ''} onChange={e => { setS({ ...s, defaultAdults: e.target.value ? Number(e.target.value) : null }); setSaved(false) }} placeholder="1" /></label>
+      <h2>APIと動作</h2>
       <label>組み直しの上限回数<input type="number" min={0} max={5} value={s.maxRepair} onChange={e => { setS({ ...s, maxRepair: Number(e.target.value) }); setSaved(false) }} /></label>
       <label>楽天 アプリID<input value={s.rakutenAppId} onChange={set('rakutenAppId')} autoComplete="off" /></label>
       <label>楽天 アクセスキー<input type="password" value={s.rakutenAccessKey} onChange={set('rakutenAccessKey')} autoComplete="off" /></label>

@@ -26,6 +26,19 @@ export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { 
   const [withEvents, setWithEvents] = useState(initial?.withEvents ?? true)
   useEffect(() => { onDraft?.({ name, conditions: c, withEvents }) }, [name, c, withEvents])
 
+  // 新しい旅行では「いつもの条件」（設定タブ）を初期値として入れる
+  useEffect(() => {
+    if (initial) return
+    getSettings().then(st => setC(x => ({
+      ...x,
+      home: x.home ?? (st.home || null),
+      startBasis: x.startBasis ?? (st.home && (st.homeTravelBasis ?? true) ? 'home' : 'gateway'),
+      endBasis: x.endBasis ?? (st.home && (st.homeTravelBasis ?? true) ? 'home' : 'gateway'),
+      mode: x.mode ?? st.defaultMode ?? null,
+      pace: x.pace ?? st.defaultPace ?? null,
+      adults: x.adults ?? st.defaultAdults ?? null,
+    })))
+  }, [])
   useEffect(() => { listAreas().then(a => { setAreas(a); if (!c.areaIds.length && a.length === 1) setC(x => ({ ...x, areaIds: [a[0].id] })) }); listPresets().then(setPresets) }, [])
 
   const upd = (p: Partial<Conditions>) => setC(x => ({ ...x, ...p }))

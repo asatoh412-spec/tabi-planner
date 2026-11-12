@@ -181,6 +181,12 @@ export interface Settings {
   rakutenAccessKey: string
   claudeModel: string
   maxRepair: number
+  /** いつもの条件（新しい旅行の初期値） */
+  home?: string
+  homeTravelBasis?: boolean
+  defaultMode?: Mode | null
+  defaultPace?: Pace | null
+  defaultAdults?: number | null
 }
 
 export const emptyConditions = (): Conditions => ({
