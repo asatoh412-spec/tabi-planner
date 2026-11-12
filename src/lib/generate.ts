@@ -3,10 +3,12 @@ import { newId } from '../db'
 import type { Conditions, Day, EventInfo, HotelCandidate, LatLng, MapArea, OfficialInfo, Plan, Settings, Stop, StopKind, Trip } from '../types'
 import { peek, remember } from './live'
 import { PACE_LIMITS, apiCount, coordOf, nameOf, scheduleAndValidate } from './schedule'
-import { addDays, daysBetween, dow, today } from './time'
-import { distanceKm, ensureOrigin } from './geo'
+import { addDays, daysBetween, dow, fromMin, toMin, today } from './time'
+import { distanceKm, ensureHomeTravel, ensureOrigin } from './geo'
 
 export type Progress = (msg: string) => void
+
+const shift = (hhmm: string, min: number) => fromMin(Math.max(0, Math.min(24 * 60 - 1, toMin(hhmm) + min)))
 
 /** 費用の集計（概算。為替は1ドル150円と仮定） */
 export class CostMeter {
@@ -150,7 +152,7 @@ function describeConditions(c: Conditions, days: Day[], pool: CandidatePool, ang
   return lines.join('\n')
 }
 
-export function buildDaySkeletons(c: Conditions, areas: MapArea[]): Day[] {
+export function buildDaySkeletons(c: Conditions, areas: MapArea[], travel: { minutes: number; estimated: boolean } | null = null): Day[] {
   const area = areas[0]
   const startDate = c.start?.slice(0, 10) ?? addDays(today(), 7)
   const endDate = c.end?.slice(0, 10) ?? startDate
@@ -159,8 +161,10 @@ export function buildDaySkeletons(c: Conditions, areas: MapArea[]): Day[] {
   const origin = c.origin ? { ...c.origin.coord, label: c.origin.label, fetchedAt: c.origin.fetchedAt } : { ...area.center, label: `${area.name}（範囲の中心）` }
   return dates.map((date, i) => ({
     date,
-    startTime: i === 0 && c.start ? c.start.slice(11, 16) : relaxed ? '10:00' : '09:00',
-    endTime: i === dates.length - 1 && c.end ? c.end.slice(11, 16) : relaxed ? '18:00' : '19:30',
+    startTime: i === 0 && c.start ? shift(c.start.slice(11, 16), c.startBasis === 'home' ? travel?.minutes ?? 0 : 0) : relaxed ? '10:00' : '09:00',
+    endTime: i === dates.length - 1 && c.end ? shift(c.end.slice(11, 16), c.endBasis === 'home' ? -(travel?.minutes ?? 0) : 0) : relaxed ? '18:00' : '19:30',
+    startApprox: i === 0 && !!c.start && c.startBasis === 'home' && !!travel?.estimated,
+    endApprox: i === dates.length - 1 && !!c.end && c.endBasis === 'home' && !!travel?.estimated,
     startPoint: origin, stops: [], legs: [], walkMeters: 0, moveMinutes: 0, slackMinutes: 0, hotels: [],
   }))
 }
@@ -191,7 +195,9 @@ function planToDraft(p: Plan): Draft {
 /** 1案を作る：組み立て→計算→検証→（破綻があれば）組み直し を上限回数まで */
 export async function generatePlan(s: Settings, c: Conditions, areas: MapArea[], pool: CandidatePool, angle: string, meter: CostMeter, progress: Progress): Promise<Plan> {
   await ensureOrigin(s, c)
-  const skeleton = buildDaySkeletons(c, areas)
+  if ((c.startBasis === 'home' || c.endBasis === 'home') && !c.homeTravelMin && !c.homeTravelEst) progress('家から玄関口までの所要時間の目安を調べています')
+  const travel = await ensureHomeTravel(s, c, u => meter.add(u))
+  const skeleton = buildDaySkeletons(c, areas, travel)
   const base = `${describeConditions(c, skeleton, pool, angle, areas)}\n\n候補（id | 名前 | 種類 | 評価(件数) | 緯度,経度 | 該当曜日の営業時間）：\n${describeCandidates(pool.all, skeleton.map(d => d.date))}`
   progress(`「${angle}」の案を組み立てています`)
   let res = await claudeJSON<Draft>(s, SYSTEM, base)

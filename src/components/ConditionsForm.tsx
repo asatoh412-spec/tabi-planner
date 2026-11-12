@@ -92,7 +92,7 @@ export default function ConditionsForm({ initial, onStart, goArea }: { initial?:
             <div className="row wrap">{areas.map(a => <button key={a.id} className={`chipbtn ${c.areaIds.includes(a.id) ? 'on' : ''}`} onClick={() => upd({ areaIds: c.areaIds.includes(a.id) ? c.areaIds.filter(x => x !== a.id) : [...c.areaIds, a.id] })}>{a.name}（{a.radiusKm}km）</button>)}
               <button className="link" onClick={goArea}>＋範囲を追加</button></div>
           </>}
-      <label>自宅（往復の乗換案内に使います）<input value={c.home ?? ''} onChange={e => upd({ home: str(e.target.value) })} placeholder="例：中野駅" /></label>
+      <label>自宅（往復の乗換案内に使います）<input value={c.home ?? ''} onChange={e => upd({ home: str(e.target.value), ...(c.startBasis ? {} : { startBasis: 'home', endBasis: 'home' }) })} placeholder="例：中野駅" /></label>
       <label>現地の玄関口（初日に着き、最終日に出る駅・空港など）</label>
       <div className="row">
         <input value={originQ} onChange={e => setOriginQ(e.target.value)} placeholder="例：田沢湖駅、弘前市表町1-1" />
@@ -104,9 +104,22 @@ export default function ConditionsForm({ initial, onStart, goArea }: { initial?:
 
       <h2>時間と移動</h2>
       <div className="grid2">
-        <label>玄関口に着く日時<input type="datetime-local" value={c.start ?? ''} onChange={e => upd({ start: str(e.target.value) })} /></label>
-        <label>玄関口を出る日時<input type="datetime-local" value={c.end ?? ''} onChange={e => upd({ end: str(e.target.value) })} /></label>
+        <div>
+          <div className="seg small">
+            <button className={c.startBasis !== 'home' ? 'on' : ''} onClick={() => upd({ startBasis: 'gateway' })}>玄関口に着く</button>
+            <button className={c.startBasis === 'home' ? 'on' : ''} onClick={() => upd({ startBasis: 'home', homeTravelEst: null })}>家を出る</button>
+          </div>
+          <label>{c.startBasis === 'home' ? '家を出る日時' : '玄関口に着く日時'}<input type="datetime-local" value={c.start ?? ''} onChange={e => upd({ start: str(e.target.value) })} /></label>
+        </div>
+        <div>
+          <div className="seg small">
+            <button className={c.endBasis !== 'home' ? 'on' : ''} onClick={() => upd({ endBasis: 'gateway' })}>玄関口を出る</button>
+            <button className={c.endBasis === 'home' ? 'on' : ''} onClick={() => upd({ endBasis: 'home', homeTravelEst: null })}>家に着く</button>
+          </div>
+          <label>{c.endBasis === 'home' ? '家に着く日時' : '玄関口を出る日時'}<input type="datetime-local" value={c.end ?? ''} onChange={e => upd({ end: str(e.target.value) })} /></label>
+        </div>
       </div>
+      {(c.startBasis === 'home' || c.endBasis === 'home') && <label>家⇄玄関口の片道の所要時間（分）<input type="number" min={0} value={c.homeTravelMin ?? ''} onChange={e => upd({ homeTravelMin: e.target.value ? Number(e.target.value) : null, homeTravelEst: null })} placeholder="空欄なら目安を自動で調べます" /></label>}
       <p className="note">往復の電車・飛行機の時刻はアプリでは推測しません。乗換案内で調べた時刻を入れてください（空欄なら初日は午前9時着・最終日は19時半発として組みます）。</p>
       <div className="seg">
         {([['train', '電車中心'], ['car', '車'], ['walk_transit', '徒歩＋公共交通']] as [Mode, string][]).map(([v, l]) =>

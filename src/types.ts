@@ -40,8 +40,17 @@ export interface Conditions {
   end: string | null
   /** 現地の玄関口（到着駅・空港など）。初日はここから始まり、最終日はここで終わる */
   origin: Origin | null
-  /** 自宅（往復の乗換案内リンク用。座標は使わない） */
+  /** 自宅（往復の乗換案内リンク用） */
   home: string | null
+  /** 時刻の基準：初日は「玄関口に着く」か「家を出る」か、最終日は「玄関口を出る」か「家に着く」か */
+  startBasis?: 'gateway' | 'home'
+  endBasis?: 'gateway' | 'home'
+  /** 家⇄玄関口の片道の所要時間（分。乗換案内で調べた値）。空なら車の所要時間で推定 */
+  homeTravelMin?: number | null
+  /** 推定した片道の所要時間（分）。homeTravelMin が空のときに使う */
+  homeTravelEst?: number | null
+  /** 推定の根拠（ウェブ検索の出典URL、または「車の経路」） */
+  homeTravelSource?: string | null
   mode: Mode | null
   pace: Pace | null
   /** 旧形式（1か所）。読み込み時に areaIds へ移す */
@@ -129,6 +138,9 @@ export interface Day {
   lodgingLeg?: Leg
   /** 帰りの玄関口に着く時刻が推定か */
   returnApprox?: boolean
+  /** 初日の玄関口着・最終日の玄関口発が、家の時刻からの推定か */
+  startApprox?: boolean
+  endApprox?: boolean
   lodgingArea?: string
   rainPlan?: string
   walkMeters: number

@@ -62,7 +62,7 @@ function advance(t: number, approx: boolean, leg: Leg, fixed?: { depart?: string
 export async function scheduleDay(s: Settings, c: Conditions, day: Day, isLast: boolean): Promise<Day & { missed: { stopId: string; at: string }[] }> {
   await Promise.all([...day.stops, ...(day.lodging ? [day.lodging] : [])].map(st => fetchLive(st.placeId)))
   let t = toMin(day.startTime)
-  let approx = false
+  let approx = !!day.startApprox
   let prev: LatLng = day.startPoint, prevName = day.startPoint.label
   const legs: Leg[] = []
   const stops: Stop[] = []

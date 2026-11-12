@@ -121,8 +121,11 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
       <p className="note">移動{day.moveMinutes}分・徒歩{(day.walkMeters / 1000).toFixed(1)}km・空き{day.slackMinutes}分{day.lodgingArea && `・宿泊エリア：${day.lodgingArea}`}</p>
 
       <ol className="timeline">
-        {di === 0 && c.home && c.origin && <li className="tl-leg">自宅（{c.home}）から {c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={day.startTime} byArrival /> <span className="note">（{day.startTime}に着く便を探す）</span></li>}
-        <li className="tl-start"><b>{day.startTime}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}</li>
+        {di === 0 && c.startBasis === 'home' && c.start && <li className="tl-start"><b>{c.start.slice(11, 16)}</b> 家を出る（{c.home ?? '自宅'}）</li>}
+        {di === 0 && c.home && c.origin && (c.startBasis === 'home' && c.start
+          ? <li className="tl-leg">{c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={c.start.slice(11, 16)} /> <span className="note">（{c.start.slice(11, 16)}以降に出る便を探す）</span></li>
+          : <li className="tl-leg">自宅（{c.home}）から {c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={day.startTime} byArrival /> <span className="note">（{day.startTime}に着く便を探す）</span></li>)}
+        <li className="tl-start"><b>{showTime(day.startTime, day.startApprox)}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}{day.startApprox && <span className="note">（家から約{c.homeTravelEst}分の目安：{c.homeTravelSource}）</span>}</li>
         {day.stops.map((st, i) => (
           <StopItem key={st.id} stop={st} leg={day.legs[i]} index={i} count={day.stops.length} dayIssues={plan.issues.filter(x => x.stopId === st.id)}
             onPin={() => editStops(ss => ss.map(x => (x.id === st.id ? { ...x, pinned: !x.pinned } : x)))}
@@ -141,7 +144,8 @@ function PlanView({ trip, plan, busy, onAdopt, onChange, onOfficial, onHotels, o
         </>}
         {!day.lodging && di < plan.days.length - 1 && <li className="tl-end">宿：未定（「宿を探す」で選べます）</li>}
         {day.returnLeg && <li className="tl-leg"><LegLine leg={day.returnLeg} /></li>}
-        {di === plan.days.length - 1 && <li className="tl-end"><b>{showTime(fromMin(toMin(day.endTime) - day.slackMinutes), day.returnApprox)}</b> {c.origin?.label ?? '終点'} 着（{day.endTime}発の予定）</li>}
+        {di === plan.days.length - 1 && <li className="tl-end"><b>{showTime(fromMin(toMin(day.endTime) - day.slackMinutes), day.returnApprox)}</b> {c.origin?.label ?? '終点'} 着（{showTime(day.endTime, day.endApprox)}発の予定）</li>}
+        {di === plan.days.length - 1 && c.endBasis === 'home' && c.end && <li className="tl-end"><b>{c.end.slice(11, 16)}</b> 家に着く（{c.home ?? '自宅'}）{day.endApprox && <span className="note">（玄関口から約{c.homeTravelEst}分の目安）</span>}</li>}
         {di === plan.days.length - 1 && c.home && c.origin && <li className="tl-leg">{c.origin.label} から自宅へ：<TransitLinks from={c.origin.label} to={c.home} date={day.date} time={day.endTime} /></li>}
       </ol>
       <div className="row"><button disabled={busy} onClick={() => onRegenDay(di)}>この日だけ作り直す（固定した場所は残す）</button></div>
