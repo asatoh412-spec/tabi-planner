@@ -48,6 +48,8 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
 
   const [originCands, setOriginCands] = useState<OriginCand[]>([])
   const [gwEdit, setGwEdit] = useState(false)
+  const [homeEdit, setHomeEdit] = useState(false)
+  const [step, setStep] = useState(initial?.conditions.areaIds?.length ? 3 : 0)
   const [timeDetail, setTimeDetail] = useState(false)
   const [times, setTimes] = useState({ leave: '07:00', ret: '21:00', home: false })
   useEffect(() => { getSettings().then(st => setTimes({ leave: st.leaveTime ?? '07:00', ret: st.returnTime ?? '21:00', home: !!st.home && (st.homeTravelBasis ?? true) })) }, [])
@@ -112,21 +114,23 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
   const angleOptions = [...ANGLES, ...(musts.length >= 2 ? musts.map(m => `${m.text}を優先`) : [])]
   const toggleAngle = (a: string) => upd({ angles: c.angles.includes(a) ? c.angles.filter(x => x !== a) : c.angles.length >= 3 ? c.angles : [...c.angles, a] })
 
+  const chosenAreas = areas.filter(a => c.areaIds.includes(a.id))
+  const STEPS = ['行き先', '日程と移動', '希望', '確認して作る']
+  const canNext = step !== 0 || c.areaIds.length > 0
+  const fmtD = (d?: string | null) => d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : '未定'
+
   return (
     <section className="page">
-      <h1>条件の入力</h1>
-      <p className="note">すべて任意です。空欄は「おまかせ」として扱います。</p>
+      <ol className="stepper">{STEPS.map((t, k) => <li key={t} className={k === step ? 'on' : k < step ? 'done' : ''}><button onClick={() => (k <= step || c.areaIds.length) && setStep(k)}>{k + 1}. {t}</button></li>)}</ol>
 
+      {step === 0 && <>
+        <h1>どこへ行きますか</h1>
       {presets.length > 0 && <div className="row">
         <span className="note">よく使う条件：</span>
         {presets.map(p => <span key={p.id} className="chip"><button className="link" onClick={() => { setC({ ...emptyConditions(), ...structuredClone(p.conditions), wishes: p.conditions.wishes.map(w => ({ ...w, id: newId() })) }); setOriginQ(p.conditions.origin?.label ?? '') }}>{p.name}</button><button className="ghost" aria-label="削除" onClick={async () => { await deletePreset(p.id); setPresets(await listPresets()) }}>×</button></span>)}
       </div>}
 
-      <label>旅行の名前<input value={name} onChange={e => setName(e.target.value)} placeholder="例：弘前 秋" /></label>
-
-      <h2>場所</h2>
-      <DestinationPicker areaIds={c.areaIds} onChange={ids => upd({ areaIds: ids })} />
-      <label>自宅（往復の乗換案内に使います）<input value={c.home ?? ''} onChange={e => { const h = str(e.target.value); upd({ home: h, ...(h && !timeDetail && c.startBasis !== 'home' ? { startBasis: 'home', endBasis: 'home', ...(c.start ? { start: `${c.start.slice(0, 10)}T${times.leave}` } : {}), ...(c.end ? { end: `${c.end.slice(0, 10)}T${times.ret}` } : {}) } : {}) }) }} placeholder="例：中野駅" /></label>
+        <DestinationPicker areaIds={c.areaIds} onChange={ids => upd({ areaIds: ids })} />
       {c.origin && !gwEdit
         ? <p>玄関口：<b>{c.origin.label}</b>{c.originAuto && <span className="note">（行き先から自動で選びました）</span>} <button className="link small" onClick={() => setGwEdit(true)}>変える</button></p>
         : <><label>現地の玄関口（初日に着き、最終日に出る駅・空港など）</label>
@@ -138,7 +142,10 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
       {originCands.some(x => x.source === 'google') && <p className="note">候補の一部の情報：Google Maps</p>}
       {originMsg && <p className="note">{originMsg}</p>}</>}
 
-      <h2>時間と移動</h2>
+      </>}
+
+      {step === 1 && <>
+        <h1>いつ、どう回りますか</h1>
       <div className="grid2">
         <label>出発日<input type="date" value={c.start?.slice(0, 10) ?? ''} onChange={e => setDates(e.target.value, c.end?.slice(0, 10) || e.target.value)} /></label>
         <label>帰る日<input type="date" value={c.end?.slice(0, 10) ?? ''} onChange={e => setDates(c.start?.slice(0, 10) || e.target.value, e.target.value)} /></label>
@@ -162,6 +169,8 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
       </div>
       {(c.startBasis === 'home' || c.endBasis === 'home') && <label>家⇄玄関口の片道の所要時間（分）<input type="number" min={0} value={c.homeTravelMin ?? ''} onChange={e => upd({ homeTravelMin: e.target.value ? Number(e.target.value) : null, homeTravelEst: null })} placeholder="空欄なら目安を自動で調べます" /></label>}
       <p className="note">往復の電車・飛行機の時刻はアプリでは推測しません。家の時刻を基準にした場合、家⇄玄関口の所要時間は自動で目安を調べます。</p></>}
+
+        <h2>移動とペース</h2>
       <div className="seg">
         {([['train', '電車中心'], ['car', '車'], ['walk_transit', '徒歩＋公共交通']] as [Mode, string][]).map(([v, l]) =>
           <button key={v} className={c.mode === v ? 'on' : ''} onClick={() => upd({ mode: c.mode === v ? null : v })}>{l}</button>)}
@@ -171,7 +180,15 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
           <button key={p} className={c.pace === p ? 'on' : ''} onClick={() => upd({ pace: c.pace === p ? null : p })}>{PACE_LIMITS[p].label}<small>{PACE_LIMITS[p].stops}か所・{PACE_LIMITS[p].walkKm}km</small></button>)}
       </div>
 
-      <h2>行き先の希望</h2>
+        {c.home && !homeEdit ? <p className="note">自宅：{c.home} <button className="link small" onClick={() => setHomeEdit(true)}>変える</button></p> : <>
+      <label>自宅（往復の乗換案内に使います）<input value={c.home ?? ''} onChange={e => { const h = str(e.target.value); upd({ home: h, ...(h && !timeDetail && c.startBasis !== 'home' ? { startBasis: 'home', endBasis: 'home', ...(c.start ? { start: `${c.start.slice(0, 10)}T${times.leave}` } : {}), ...(c.end ? { end: `${c.end.slice(0, 10)}T${times.ret}` } : {}) } : {}) }) }} placeholder="例：中野駅" /></label>
+        </>}
+      </>}
+
+      {step === 2 && <>
+        <h1>希望はありますか</h1>
+        <p className="note">空欄でも作れます（おまかせ）。</p>
+        <h2>行きたい・行きたくない場所</h2>
       <div className="seg small">
         {PRI.map(p => <button key={p.v} className={wishPri === p.v ? 'on' : ''} onClick={() => setWishPri(p.v)}>{p.label}</button>)}
       </div>
@@ -190,7 +207,8 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
         ))}
       </ul>
 
-      <h2>食事・宿・予算</h2>
+        <details className="more" open={!!(c.food || c.lodging || c.budget)}>
+          <summary>食事・宿・予算・人数</summary>
       <label>食事の希望<input value={c.food ?? ''} onChange={e => upd({ food: str(e.target.value) })} placeholder="例：郷土料理、地酒、1食3,000円まで" /></label>
       <label>宿の条件<input value={c.lodging ?? ''} onChange={e => upd({ lodging: str(e.target.value) })} placeholder="例：温泉、駅から徒歩10分以内、1泊15,000円まで" /></label>
       <div className="grid2">
@@ -198,16 +216,34 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
         <label>人数<input type="number" min={1} max={10} value={c.adults ?? ''} onChange={e => upd({ adults: e.target.value ? Number(e.target.value) : null })} placeholder="1" /></label>
       </div>
 
-      <h2>作り分け（最大3案）</h2>
+        </details>
+      </>}
+
+      {step === 3 && <>
+        <h1>この内容で作ります</h1>
+        <dl className="summary">
+          <dt>行き先</dt><dd>{chosenAreas.map(a => a.name).join('・') || '未選択'}{c.origin ? `（玄関口：${c.origin.label}）` : ''} <button className="link small" onClick={() => setStep(0)}>変える</button></dd>
+          <dt>日程</dt><dd>{fmtD(c.start)}〜{fmtD(c.end)}・{c.startBasis === 'home' ? `家を${c.start?.slice(11, 16) ?? ''}に出る` : `玄関口に${c.start?.slice(11, 16) ?? ''}着`}・{c.endBasis === 'home' ? `家に${c.end?.slice(11, 16) ?? ''}着` : `玄関口を${c.end?.slice(11, 16) ?? ''}発`} <button className="link small" onClick={() => setStep(1)}>変える</button></dd>
+          <dt>移動</dt><dd>{({ train: '電車中心', car: '車', walk_transit: '徒歩＋公共交通' } as Record<string, string>)[c.mode ?? ''] ?? 'おまかせ'}・{c.pace ? PACE_LIMITS[c.pace].label : 'ペースおまかせ'}</dd>
+          <dt>希望</dt><dd>{c.wishes.length ? c.wishes.map(w => `${PRI.find(p => p.v === w.priority)!.label}：${w.text}`).join('、') : 'おまかせ'} <button className="link small" onClick={() => setStep(2)}>変える</button></dd>
+        </dl>
+      <label>旅行の名前<input value={name} onChange={e => setName(e.target.value)} placeholder="例：弘前 秋（空欄なら行き先の名前）" /></label>
+
+        <h2>作り分け（最大3案）</h2>
       <div className="row wrap">
         {angleOptions.map(a => <button key={a} className={`chipbtn ${c.angles.includes(a) ? 'on' : ''}`} onClick={() => toggleAngle(a)}>{a}</button>)}
       </div>
       <p className="note">未選択なら「バランス」の1案。案が増えるほど費用と時間がかかります（1案あたりClaude約70円＋Places・Routesの呼び出し）。</p>
       <label className="check"><input type="checkbox" checked={withEvents} onChange={e => setWithEvents(e.target.checked)} />見頃・イベントもウェブ検索で調べる（約10〜20円）</label>
 
+      </>}
+
       <div className="row sticky-actions">
-        <button onClick={async () => { const n = prompt('この条件の名前'); if (n) { await savePreset({ id: newId(), name: n, conditions: c, savedAt: new Date().toISOString() }); setPresets(await listPresets()) } }}>よく使う条件に保存</button>
-        <button className="primary" disabled={!c.areaIds.length} onClick={() => onStart({ name: name || areas.filter(a => c.areaIds.includes(a.id)).map(a => a.name).join('・') || '旅行', conditions: c, withEvents })}>プランを作る</button>
+        {step > 0 && <button onClick={() => setStep(step - 1)}>戻る</button>}
+        {step === 3 && <button onClick={async () => { const n = prompt('この条件の名前'); if (n) { await savePreset({ id: newId(), name: n, conditions: c, savedAt: new Date().toISOString() }); setPresets(await listPresets()) } }}>よく使う条件に保存</button>}
+        {step < 3
+          ? <button className="primary" disabled={!canNext} onClick={() => setStep(step + 1)}>{step === 0 && !c.areaIds.length ? '行き先を選んでください' : '次へ'}</button>
+          : <button className="primary" disabled={!c.areaIds.length} onClick={() => onStart({ name: name || chosenAreas.map(a => a.name).join('・') || '旅行', conditions: c, withEvents })}>プランを作る</button>}
       </div>
     </section>
   )

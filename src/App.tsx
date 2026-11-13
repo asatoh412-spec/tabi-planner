@@ -4,9 +4,9 @@ import ConditionsForm, { type StartRequest } from './components/ConditionsForm'
 import Generating from './components/Generating'
 import Settings from './components/Settings'
 import TripView from './components/TripView'
-import { deleteTrip, listTrips, purgeExpiredGoogleCoords } from './db'
-import { fmtDate } from './lib/time'
-import type { Conditions, Trip } from './types'
+import { deleteTrip, listAreas, listTrips, purgeExpiredGoogleCoords } from './db'
+import TripCard from './components/TripCard'
+import type { Conditions, MapArea, Trip } from './types'
 
 type View =
   | { k: 'trips' } | { k: 'area'; fromForm?: boolean } | { k: 'settings' }
@@ -15,6 +15,8 @@ type View =
 
 function Trips({ open, create, draft, resume }: { open: (id: string) => void; create: () => void; draft: StartRequest | null; resume: () => void }) {
   const [trips, setTrips] = useState<Trip[]>([])
+  const [areas, setAreas] = useState<MapArea[]>([])
+  useEffect(() => { listAreas().then(setAreas) }, [])
   useEffect(() => { listTrips().then(t => setTrips(t.sort((a, b) => b.createdAt.localeCompare(a.createdAt)))) }, [])
   return (
     <section className="page">
@@ -24,15 +26,8 @@ function Trips({ open, create, draft, resume }: { open: (id: string) => void; cr
         <button className={draft ? '' : 'primary'} onClick={create}>新しい旅行</button>
       </div>
       {trips.length === 0 && <p className="note">まだ旅行はありません。先に「範囲」で行き先の範囲を保存し、「設定」でAPIキーを入れてください。</p>}
-      <ul className="list cards">
-        {trips.map(t => {
-          const p = t.plans.find(x => x.id === t.adoptedPlanId) ?? t.plans[0]
-          return <li key={t.id}>
-            <button className="link" onClick={() => open(t.id)}>{t.name}</button>
-            <span className="note">{p ? `${fmtDate(p.days[0].date)}〜 ${t.plans.length}案` : '案なし'}{t.adoptedPlanId ? '・採用済み' : ''}</span>
-            <button className="ghost" onClick={async () => { if (confirm(`「${t.name}」を削除しますか`)) { await deleteTrip(t.id); setTrips(trips.filter(x => x.id !== t.id)) } }}>削除</button>
-          </li>
-        })}
+      <ul className="trip-cards">
+        {trips.map(t => <TripCard key={t.id} trip={t} areas={areas} onOpen={() => open(t.id)} onDelete={async () => { if (confirm(`「${t.name}」を削除しますか`)) { await deleteTrip(t.id); setTrips(trips.filter(x => x.id !== t.id)) } }} />)}
       </ul>
     </section>
   )

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getSettings, getTrip, listAreas, saveTrip } from '../db'
-import { placesCandidates, type Candidate } from '../api/clients'
+import { photoUrl, placesCandidates, type Candidate } from '../api/clients'
 import { CostMeter, chooseLodging, combinePlans, fetchHotels, fetchOfficialInfo, regenerateDay } from '../lib/generate'
-import { remember, useLive } from '../lib/live'
+import { googleKey, remember, useLive } from '../lib/live'
+import Icon from './Icon'
 import { CHECKIN_BY, PACE_LIMITS, coordOf, nameOf, scheduleAndValidate, showTime } from '../lib/schedule'
 import { fmtDate, fromMin, toMin } from '../lib/time'
 import { bookingLinks, transitLinks } from '../lib/transit'
@@ -123,6 +124,7 @@ function PlanView({ trip, plan, busy, onAdopt, onEarlier, onChange, onOfficial, 
   onRegenDay: (i: number) => void; onRegenerate: (c: Conditions) => void; onDelete: () => void
 }) {
   const [di, setDi] = useState(0)
+  const [view, setView] = useState<'list' | 'map'>('list')
   const [areas, setAreas] = useState<MapArea[]>([])
   useEffect(() => { listAreas().then(a => setAreas(a.filter(x => trip.conditions.areaIds.includes(x.id)))) }, [trip.conditions.areaIds])
   const day = plan.days[Math.min(di, plan.days.length - 1)]
@@ -132,6 +134,8 @@ function PlanView({ trip, plan, busy, onAdopt, onEarlier, onChange, onOfficial, 
 
   return (
     <div>
+      {plan.issues.length > 0 && <details className={`notices ${plan.issues.some(x => x.kind !== 'idle') ? 'warn' : ''}`}>
+        <summary>{[plan.issues.some(x => x.kind !== 'idle') && `確認が必要な点 ${plan.issues.filter(x => x.kind !== 'idle').length}件`, plan.issues.some(x => x.kind === 'idle') && `時間の余裕 ${plan.issues.filter(x => x.kind === 'idle').length}件`].filter(Boolean).join('・')}（タップで開く）</summary>
       {plan.issues.some(x => x.kind !== 'idle') && <Conflict trip={{ ...trip }} plan={{ ...plan, issues: plan.issues.filter(x => x.kind !== 'idle') }} onRegenerate={onRegenerate} />}
       {plan.issues.filter(x => x.kind === 'idle').map((x, i) => {
         const lastI = plan.days.length - 1
@@ -150,26 +154,43 @@ function PlanView({ trip, plan, busy, onAdopt, onEarlier, onChange, onOfficial, 
           <p className="note">早めに帰る場合も、実際の便は乗換案内で確認してください。</p>
         </div>
       })}
-      <div className="row wrap">
-        {trip.adoptedPlanId !== plan.id && <button className="primary" onClick={onAdopt}>この案を採用</button>}
-        <button disabled={busy} onClick={onOfficial}>公式サイトの情報を取得</button>
-        <button disabled={busy} onClick={onHotels}>宿を探す</button>
-        <button onClick={() => window.print()}>印刷・PDFで保存</button>
-        <button className="ghost" onClick={onDelete}>案を削除</button>
+      </details>}
+      <div className="row actions">
+        {trip.adoptedPlanId !== plan.id ? <button className="primary" onClick={onAdopt}>この案を採用</button> : <span className="badge big">採用中の案</span>}
+        <details className="menu">
+          <summary>その他の操作</summary>
+          <div className="menu-items" onClick={e => { const d = (e.currentTarget as HTMLElement).closest('details'); if (d) d.open = false }}>
+            <button disabled={busy} onClick={onOfficial}>公式サイトの情報を取得</button>
+            <button disabled={busy} onClick={onHotels}>宿を探し直す</button>
+            <button disabled={busy} onClick={() => onRegenDay(di)}>{di + 1}日目だけ作り直す</button>
+            <button onClick={() => window.print()}>印刷・PDFで保存</button>
+            <button className="danger" onClick={onDelete}>この案を削除</button>
+          </div>
+        </details>
       </div>
 
-      <div className="tabs-inline">
-        {plan.days.map((d, i) => <button key={d.date} className={i === di ? 'on' : ''} onClick={() => setDi(i)}>{i + 1}日目 {fmtDate(d.date)}</button>)}
+      <div className="day-tabs">
+        {plan.days.map((d, i) => <button key={d.date} className={i === di ? 'on' : ''} onClick={() => setDi(i)}><small>{i + 1}日目</small>{fmtDate(d.date)}</button>)}
       </div>
-
-      <p className="note">移動{day.moveMinutes}分・徒歩{(day.walkMeters / 1000).toFixed(1)}km・空き{day.slackMinutes}分{day.lodgingArea && `・宿泊エリア：${day.lodgingArea}`}</p>
+      <div className="day-stats">
+        <span><Icon name="train" />移動 {Math.floor(day.moveMinutes / 60) ? `${Math.floor(day.moveMinutes / 60)}時間` : ''}{day.moveMinutes % 60}分</span>
+        <span><Icon name="walk" />徒歩 {(day.walkMeters / 1000).toFixed(1)}km</span>
+        <span>空き {day.slackMinutes}分</span>
+        {day.lodgingArea && <span><Icon name="lodging" />{day.lodgingArea}</span>}
+      </div>
+      <div className="seg small view-switch">
+        <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>予定</button>
+        <button className={view === 'map' ? 'on' : ''} onClick={() => setView('map')}>地図</button>
+      </div>
+      <div className={`plan-grid show-${view}`}>
+      <div className="plan-col">
 
       <ol className="timeline">
-        {di === 0 && c.startBasis === 'home' && c.start && <li className="tl-start"><b>{c.start.slice(11, 16)}</b> 家を出る（{c.home ?? '自宅'}）</li>}
+        {di === 0 && c.startBasis === 'home' && c.start && <li className="tl-start"><Icon name="home" /><b>{c.start.slice(11, 16)}</b> 家を出る（{c.home ?? '自宅'}）</li>}
         {di === 0 && c.home && c.origin && (c.startBasis === 'home' && c.start
           ? <li className="tl-leg">{c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={c.start.slice(11, 16)} /> <span className="note">（{c.start.slice(11, 16)}以降に出る便を探す）</span></li>
           : <li className="tl-leg">自宅（{c.home}）から {c.origin.label} へ：<TransitLinks from={c.home} to={c.origin.label} date={day.date} time={day.startTime} byArrival /> <span className="note">（{day.startTime}に着く便を探す）</span></li>)}
-        <li className="tl-start"><b>{showTime(day.startTime, day.startApprox)}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}{day.startApprox && (c.homeTravelEst ? <span className="note">（家から約{c.homeTravelEst}分の目安：{c.homeTravelSource}）</span> : <span className="err">（家からの所要時間を調べられなかったため、家を出る時刻のまま計算しています（{c.homeTravelSource}）。条件の「片道の所要時間」に入れて作り直してください）</span>)}</li>
+        <li className="tl-start"><Icon name={di === 0 ? 'gate' : 'lodging'} /><b>{showTime(day.startTime, day.startApprox)}</b> {di === 0 ? '着' : '出発'}：{day.startPoint.label}{day.startApprox && (c.homeTravelEst ? <span className="note">（家から約{c.homeTravelEst}分の目安：{c.homeTravelSource}）</span> : <span className="err">（家からの所要時間を調べられなかったため、家を出る時刻のまま計算しています（{c.homeTravelSource}）。条件の「片道の所要時間」に入れて作り直してください）</span>)}</li>
         {day.stops.map((st, i) => (
           <StopItem key={st.id} stop={st} leg={day.legs[i]} index={i} count={day.stops.length} dayIssues={plan.issues.filter(x => x.stopId === st.id)}
             onPin={() => editStops(ss => ss.map(x => (x.id === st.id ? { ...x, pinned: !x.pinned } : x)))}
@@ -182,21 +203,21 @@ function PlanView({ trip, plan, busy, onAdopt, onEarlier, onChange, onOfficial, 
           />
         ))}
         {day.lodging && <>
-          {day.lodgingLeg && <li className="tl-leg"><LegLine leg={day.lodgingLeg} /> <TransitInput value={day.lodging.transitIn} show={day.lodgingLeg.mode === 'train'} onChange={tin => onChange({ ...plan, days: plan.days.map((d, i) => (i === di ? { ...d, lodging: { ...d.lodging!, transitIn: tin } } : d)) })} /></li>}
-          <li className="tl-stop lodging"><div className="stop-head"><b>{showTime(day.lodging.arrive, day.lodging.approx)}</b><span className="kind">宿</span><span className="stop-name">{nameOf(day.lodging)}</span>{day.lodging.pinned && <span className="badge">固定</span>}</div>
+          {day.lodgingLeg && <li className="tl-leg"><LegLine leg={day.lodgingLeg} /> <TransitBox leg={day.lodgingLeg} value={day.lodging.transitIn} onChange={tin => onChange({ ...plan, days: plan.days.map((d, i) => (i === di ? { ...d, lodging: { ...d.lodging!, transitIn: tin } } : d)) })} /></li>}
+          <li className="tl-stop lodging"><div className="stop-head"><span className="kind-icon"><Icon name="lodging" /></span><b>{showTime(day.lodging.arrive, day.lodging.approx)}</b><span className="stop-name">{nameOf(day.lodging)}</span>{day.lodging.pinned && <span className="badge">固定</span>}</div>
             <p className="note">{CHECKIN_BY}までに着く想定。下の「宿の候補」から変えられます</p></li>
         </>}
         {!day.lodging && di < plan.days.length - 1 && <li className="tl-end">宿：未定（「宿を探す」で選べます）</li>}
-        {day.returnLeg && <li className="tl-leg"><LegLine leg={day.returnLeg} /></li>}
-        {di === plan.days.length - 1 && <li className="tl-end"><b>{showTime(fromMin(toMin(day.endTime) - day.slackMinutes), day.returnApprox)}</b> {c.origin?.label ?? '終点'} 着（{showTime(day.endTime, day.endApprox)}発の予定）</li>}
-        {di === plan.days.length - 1 && c.endBasis === 'home' && c.end && <li className="tl-end"><b>{c.end.slice(11, 16)}</b> 家に着く（{c.home ?? '自宅'}）{day.endApprox && <span className="note">（玄関口から約{c.homeTravelEst}分の目安）</span>}</li>}
+        {day.returnLeg && <li className="tl-leg"><LegLine leg={day.returnLeg} /> <TransitBox leg={day.returnLeg} onChange={() => {}} /></li>}
+        {di === plan.days.length - 1 && <li className="tl-end"><Icon name="gate" /><b>{showTime(fromMin(toMin(day.endTime) - day.slackMinutes), day.returnApprox)}</b> {c.origin?.label ?? '終点'} 着（{showTime(day.endTime, day.endApprox)}発の予定）</li>}
+        {di === plan.days.length - 1 && c.endBasis === 'home' && c.end && <li className="tl-end"><Icon name="home" /><b>{c.end.slice(11, 16)}</b> 家に着く（{c.home ?? '自宅'}）{day.endApprox && <span className="note">（玄関口から約{c.homeTravelEst}分の目安）</span>}</li>}
         {di === plan.days.length - 1 && c.home && c.origin && <li className="tl-leg">{c.origin.label} から自宅へ：<TransitLinks from={c.origin.label} to={c.home} date={day.date} time={day.endTime} /></li>}
       </ol>
-      <div className="row"><button disabled={busy} onClick={() => onRegenDay(di)}>この日だけ作り直す（固定した場所は残す）</button></div>
 
-      {day.rainPlan && <p className="box"><b>雨の日の代案：</b>{day.rainPlan}</p>}
-
-      <GoogleRouteMap routes={routes} />
+      {day.rainPlan && <p className="box rain"><b>雨の日は：</b>{day.rainPlan}</p>}
+      </div>
+      <div className="map-col"><GoogleRouteMap routes={routes} height={520} /></div>
+      </div>
 
       <PrintPlan trip={trip} plan={plan} />
       {di < plan.days.length - 1 && <Hotels day={day} next={plan.days[di + 1]} adults={c.adults ?? 1} onPick={h => onChange(chooseLodging(plan, di, h))} />}
@@ -205,10 +226,19 @@ function PlanView({ trip, plan, busy, onAdopt, onEarlier, onChange, onOfficial, 
 }
 
 function LegLine({ leg }: { leg: Leg }) {
-  return <span className="leg">{LEGMODE[leg.mode]} {leg.estimated ? '約' : ''}{leg.minutes}分{leg.meters ? `・${(leg.meters / 1000).toFixed(1)}km` : ''}
+  return <span className="leg"><Icon name={leg.mode} size={14} />{LEGMODE[leg.mode]} {leg.estimated ? '約' : ''}{leg.minutes}分{leg.meters && leg.mode !== 'train' ? `・${(leg.meters / 1000).toFixed(1)}km` : ''}
     {leg.estimated && <span className="badge warn">推定</span>}
-    {leg.transitLinks?.map(l => <a key={l.url} href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}
   </span>
+}
+
+/** 公共交通の区間：乗換案内へのリンクと、調べた時刻の入力をまとめて畳んでおく */
+function TransitBox({ leg, value, onChange }: { leg: Leg; value?: Stop['transitIn']; onChange: (t: Stop['transitIn']) => void }) {
+  if (leg.mode !== 'train') return null
+  return <details className="transit">
+    <summary>{value ? `実際の便 ${value.depart ?? ''}→${value.arrive}` : '便を調べる'}</summary>
+    <div>{leg.transitLinks?.map(l => <a key={l.url} className="bk" href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}</div>
+    <TransitInput value={value} show onChange={onChange} />
+  </details>
 }
 
 function StopItem({ stop, leg, index, count, dayIssues, onPin, onMove, onRemove, onStay, onReplace, onTransit, center }: {
@@ -219,14 +249,18 @@ function StopItem({ stop, leg, index, count, dayIssues, onPin, onMove, onRemove,
   const [open, setOpen] = useState(false)
   const [rep, setRep] = useState(false)
   const o = stop.official
+  const photo = live?.photos?.[0]
   return <>
-    {leg && <li className="tl-leg"><LegLine leg={leg} /> <TransitInput value={stop.transitIn} show={leg.mode === 'train'} onChange={onTransit} /></li>}
+    {leg && (leg.minutes > 0 || leg.mode === 'train') && <li className="tl-leg"><LegLine leg={leg} /> <TransitBox leg={leg} value={stop.transitIn} onChange={onTransit} /></li>}
     <li className={`tl-stop ${dayIssues.length ? 'has-issue' : ''}`}>
       <div className="stop-head" onClick={() => setOpen(!open)}>
-        <b>{showTime(stop.arrive, stop.approx)}–{showTime(stop.depart, stop.approx)}</b>
-        <span className="kind">{KIND[stop.kind]}</span>
-        <span className="stop-name">{nameOf(stop)}</span>
-        {stop.pinned && <span className="badge">固定</span>}
+        {photo ? <img className="thumb" src={photoUrl(googleKey(), photo.name, 160)} alt="" loading="lazy" /> : <span className="kind-icon"><Icon name={stop.kind} size={20} /></span>}
+        <div className="stop-main">
+          <span className="stop-time">{showTime(stop.arrive, stop.approx)}–{showTime(stop.depart, stop.approx)}<span className="kind">{KIND[stop.kind]}・{stop.stayMin}分</span></span>
+          <span className="stop-name">{nameOf(stop)}{stop.pinned && <span className="badge">固定</span>}</span>
+          {photo?.author && <span className="photo-credit">写真：{photo.author}</span>}
+        </div>
+        <span className="chev">{open ? '▴' : '▾'}</span>
       </div>
       {dayIssues.map((x, i) => <p key={i} className="err">{x.text}</p>)}
       {open && <div className="stop-body">
@@ -234,6 +268,7 @@ function StopItem({ stop, leg, index, count, dayIssues, onPin, onMove, onRemove,
           {o.hours && <p>営業時間：{o.hours}</p>}{o.closed && <p>休み：{o.closed}</p>}{o.fee && <p>料金：{o.fee}</p>}{o.highlight && <p>見どころ：{o.highlight}</p>}
           <p className="note">{o.sourceUrl ? <a href={o.sourceUrl} target="_blank" rel="noreferrer">出典</a> : '出典なし'}・{o.checkedAt.slice(0, 10)}確認{o.needsCheck && <span className="badge warn">要確認</span>}</p>
         </div>}
+        {live?.photos && live.photos.length > 0 && <div className="photos">{live.photos.map(ph => <figure key={ph.name}><img src={photoUrl(googleKey(), ph.name, 600)} alt="" loading="lazy" /><figcaption>{ph.authorUri ? <a href={ph.authorUri} target="_blank" rel="noreferrer">{ph.author}</a> : ph.author}</figcaption></figure>)}</div>}
         {live && <div className="google">
           {live.rating && <p>評価 {live.rating}（{live.ratingCount}件）{live.typeLabel && `・${live.typeLabel}`}</p>}
           {live.weekdayText && <details><summary>Googleの営業時間</summary><ul>{live.weekdayText.map(w => <li key={w}>{w}</li>)}</ul></details>}

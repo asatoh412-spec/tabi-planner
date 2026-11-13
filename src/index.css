@@ -122,3 +122,94 @@ textarea { display: block; width: 100%; margin-top: 4px; padding: 8px; font-size
 .dest { flex-wrap: wrap; }
 .radius { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .chipbtn.small { padding: 2px 8px; font-size: 12px; }
+
+/* ---- 2026-11-14 UI 改善 ---- */
+:root { --accent-soft: #e4eee9; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.04); }
+@media (prefers-color-scheme: dark) { :root { --accent-soft: #23342e; --shadow: none; } }
+.page { max-width: 760px; }
+h1 { font-size: 22px; letter-spacing: .02em; }
+.icon { flex: none; vertical-align: -3px; margin-right: 4px; }
+
+/* 段階式の入力 */
+.stepper { display: flex; gap: 4px; list-style: none; padding: 0; margin: 0 0 16px; overflow-x: auto; }
+.stepper li { flex: 1; min-width: 72px; }
+.stepper button { width: 100%; border: none; border-bottom: 3px solid var(--line); border-radius: 0; background: none; font-size: 12px; color: var(--muted); padding: 8px 2px; }
+.stepper li.done button { border-color: var(--accent); color: var(--ink); }
+.stepper li.on button { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.summary { display: grid; grid-template-columns: 5em 1fr; gap: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; font-size: 14px; }
+.summary dt { color: var(--muted); }
+.summary dd { margin: 0; }
+details.more { margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
+details.more summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.sticky-actions { gap: 8px; }
+.sticky-actions .primary { flex: 1; max-width: 320px; }
+
+/* 予定画面 */
+.actions { justify-content: space-between; }
+.badge.big { font-size: 13px; padding: 6px 10px; border-radius: 8px; }
+details.menu { position: relative; }
+details.menu summary { list-style: none; cursor: pointer; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 14px; }
+details.menu summary::-webkit-details-marker { display: none; }
+details.menu .menu-items { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: flex; flex-direction: column; min-width: 220px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.15); padding: 4px; }
+details.menu .menu-items button { border: none; text-align: left; border-radius: 6px; }
+details.menu .menu-items button:hover { background: var(--accent-soft); }
+.danger { color: var(--err) !important; }
+.day-tabs { position: sticky; top: 0; z-index: 10; display: flex; gap: 6px; overflow-x: auto; background: var(--bg); padding: 8px 0; margin: 8px 0 0; }
+.day-tabs button { display: flex; flex-direction: column; align-items: center; min-width: 84px; padding: 6px 10px; font-size: 14px; border-radius: 10px; }
+.day-tabs button small { font-size: 11px; color: var(--muted); }
+.day-tabs button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.day-tabs button.on small { color: var(--accent-ink); opacity: .85; }
+.day-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--muted); margin: 6px 0 10px; }
+.view-switch { max-width: 220px; }
+.plan-grid { display: block; }
+.plan-grid.show-list .map-col { display: none; }
+.plan-grid.show-map .plan-col { display: none; }
+@media (min-width: 980px) {
+  .page:has(.plan-grid) { max-width: 1180px; }
+  .view-switch { display: none; }
+  .plan-grid, .plan-grid.show-list, .plan-grid.show-map { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .plan-grid .plan-col, .plan-grid .map-col { display: block !important; }
+  .map-col { position: sticky; top: 72px; }
+}
+.timeline { border-left-color: var(--accent-soft); border-left-width: 3px; }
+.tl-start, .tl-end { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tl-stop { box-shadow: var(--shadow); border-radius: 12px; }
+.stop-head { display: flex; gap: 10px; align-items: center; flex-wrap: nowrap; }
+.stop-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.stop-time { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.stop-time .kind { margin-left: 8px; }
+.stop-name { font-size: 16px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.photo-credit { font-size: 10px; color: var(--muted); }
+.thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; flex: none; background: var(--accent-soft); }
+.kind-icon { width: 56px; height: 56px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.kind-icon .icon { margin: 0; }
+.lodging .kind-icon { width: 40px; height: 40px; }
+.chev { color: var(--muted); font-size: 12px; }
+.photos { display: flex; gap: 6px; overflow-x: auto; margin: 6px 0; }
+.photos figure { margin: 0; flex: none; }
+.photos img { height: 140px; border-radius: 8px; display: block; }
+.photos figcaption { font-size: 10px; color: var(--muted); }
+.tl-leg { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.leg { display: inline-flex; align-items: center; gap: 2px; }
+details.transit { font-size: 13px; }
+details.transit summary { cursor: pointer; color: var(--accent); }
+details.transit > div { margin: 4px 0; }
+.box.rain { background: var(--accent-soft); border-color: transparent; }
+
+/* 旅行一覧 */
+.trip-cards { list-style: none; padding: 0; margin: 16px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.trip-card { position: relative; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; cursor: pointer; box-shadow: var(--shadow); }
+.trip-card:hover { border-color: var(--accent); }
+.trip-map { height: 120px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; }
+.trip-info { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px; }
+.trip-name { font-size: 17px; }
+.trip-dates { font-size: 14px; }
+.trip-badges { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.trip-card .del { position: absolute; top: 6px; right: 6px; background: var(--surface); border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+details.notices { margin: 10px 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
+details.notices.warn { border-color: #c9a227; }
+details.notices summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+details.notices.warn summary { color: #8a6d1d; }
+@media (prefers-color-scheme: dark) { details.notices.warn summary { color: #e0c463; } }
+.dest { flex-wrap: nowrap !important; }
+.dest .radius { overflow-x: auto; flex-wrap: nowrap; }

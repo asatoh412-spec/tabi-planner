@@ -7,6 +7,11 @@ const cache = new Map<string, Candidate>()
 const pending = new Map<string, Promise<Candidate | null>>()
 
 export const remember = (c: Candidate) => cache.set(c.id, c)
+
+/** 写真のURLを作るためのキー（設定から読む） */
+let gkey = ''
+getSettings().then(s => { gkey = s.googleKey }).catch(() => {})
+export const googleKey = () => gkey
 export const peek = (id: string) => cache.get(id)
 
 export function fetchLive(id: string): Promise<Candidate | null> {

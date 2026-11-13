@@ -85,13 +85,15 @@ export interface Candidate {
   periods?: OpenPeriod[]
   weekdayText?: string[]
   mapsUri?: string
+  /** 写真（Googleの写真。表示時は投稿者名を必ず添える。保存しない） */
+  photos?: { name: string; author?: string; authorUri?: string }[]
 }
 export interface OpenPeriod { open: { day: number; hour: number; minute: number }; close?: { day: number; hour: number; minute: number } }
 
 const CANDIDATE_MASK = [
   'places.id', 'places.displayName', 'places.location', 'places.formattedAddress', 'places.primaryType',
   'places.primaryTypeDisplayName', 'places.rating', 'places.userRatingCount', 'places.priceLevel',
-  'places.regularOpeningHours', 'places.googleMapsUri',
+  'places.regularOpeningHours', 'places.googleMapsUri', 'places.photos',
 ].join(',')
 
 interface RawPlace {
@@ -99,6 +101,7 @@ interface RawPlace {
   formattedAddress?: string; primaryType?: string; primaryTypeDisplayName?: { text: string }
   rating?: number; userRatingCount?: number; priceLevel?: string
   regularOpeningHours?: { periods?: OpenPeriod[]; weekdayDescriptions?: string[] }; googleMapsUri?: string
+  photos?: { name: string; authorAttributions?: { displayName?: string; uri?: string }[] }[]
 }
 const toCandidate = (p: RawPlace): Candidate => ({
   id: p.id, name: p.displayName?.text ?? '(名称不明)',
@@ -106,6 +109,7 @@ const toCandidate = (p: RawPlace): Candidate => ({
   address: p.formattedAddress, type: p.primaryType, typeLabel: p.primaryTypeDisplayName?.text,
   rating: p.rating, ratingCount: p.userRatingCount, priceLevel: p.priceLevel,
   periods: p.regularOpeningHours?.periods, weekdayText: p.regularOpeningHours?.weekdayDescriptions, mapsUri: p.googleMapsUri,
+  photos: p.photos?.slice(0, 3).map(x => ({ name: x.name, author: x.authorAttributions?.[0]?.displayName, authorUri: x.authorAttributions?.[0]?.uri })),
 })
 
 /** 営業時間・評価を含む検索（Enterprise料金：月1,000件まで無料） */
@@ -137,7 +141,7 @@ export async function placesLocate(s: Settings, query: string, center: LatLng, r
 }
 
 /** 1か所の詳細（表示用。保存しない） */
-export async function placeDetails(s: Settings, placeId: string, mask = 'id,displayName,location,formattedAddress,regularOpeningHours,rating,userRatingCount,googleMapsUri,primaryTypeDisplayName,priceLevel'): Promise<Candidate> {
+export async function placeDetails(s: Settings, placeId: string, mask = 'id,displayName,location,formattedAddress,regularOpeningHours,rating,userRatingCount,googleMapsUri,primaryTypeDisplayName,priceLevel,photos'): Promise<Candidate> {
   const r = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=ja`, {
     headers: { 'X-Goog-Api-Key': s.googleKey, 'X-Goog-FieldMask': mask },
   })
@@ -265,3 +269,6 @@ export function extractJSON<T>(text: string): T {
   if (!isFinite(i) || k < i) throw new Error('Claudeの返答からJSONを読み取れませんでした')
   return JSON.parse(src.slice(i, k + 1)) as T
 }
+
+/** Places の写真のURL（Place Photos：月1,000件まで無料、超えると1,000件あたり$7）。キーはウェブサイト制限付き */
+export const photoUrl = (key: string, name: string, w = 400) => `https://places.googleapis.com/v1/${name}/media?maxWidthPx=${w}&key=${encodeURIComponent(key)}`
