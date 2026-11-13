@@ -74,3 +74,13 @@ function toMinutes(v: unknown): number | undefined {
   const m = v.match(/(\d+)/)
   return m ? Number(m[1]) : undefined
 }
+
+/** 行き先（最初の範囲）の近くの駅を、玄関口として自動で選ぶ */
+export async function autoGateway(s: Settings, area: { name: string; center: LatLng }) {
+  if (!s.googleKey) return null
+  const cs = await placesLocate(s, `${area.name} 駅`, area.center, 15000)
+  const st = cs.filter(x => x.name.endsWith('駅'))
+  const pick = (st.length ? st : cs).sort((a, b) => distanceKm(a.location, area.center) - distanceKm(b.location, area.center))[0]
+  if (!pick) return null
+  return { label: pick.name, coord: pick.location, source: 'google' as const, placeId: pick.id, fetchedAt: new Date().toISOString() }
+}

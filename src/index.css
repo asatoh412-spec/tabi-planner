@@ -118,3 +118,7 @@ h3 { font-size: 15px; margin: 4px 0 8px; }
   .print-only td:first-child { white-space: nowrap; width: 5em; }
   .print-day { break-inside: avoid; }
 }
+textarea { display: block; width: 100%; margin-top: 4px; padding: 8px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-family: ui-monospace, monospace; }
+.dest { flex-wrap: wrap; }
+.radius { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chipbtn.small { padding: 2px 8px; font-size: 12px; }

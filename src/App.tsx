@@ -60,7 +60,7 @@ export default function App() {
       {!online && <div className="offline no-print">オフラインです（このアプリはオンラインで使います）</div>}
       <main>
         {view.k === 'trips' && <Trips open={id => setView({ k: 'trip', id })} create={() => { setDraft(null); setView({ k: 'new', initial: undefined }) }} draft={draft} resume={() => setView({ k: 'new', initial: draft ?? undefined })} />}
-        {view.k === 'new' && <ConditionsForm key={JSON.stringify(view.initial?.conditions ?? null).length} initial={view.initial ?? draft ?? undefined} onDraft={setDraft} onStart={req => { setDraft(null); setView({ k: 'gen', req }) }} goArea={() => setView({ k: 'area', fromForm: true })} />}
+        {view.k === 'new' && <ConditionsForm key={JSON.stringify(view.initial?.conditions ?? null).length} initial={view.initial ?? draft ?? undefined} onDraft={setDraft} onStart={req => { setDraft(null); setView({ k: 'gen', req }) }} />}
         {view.k === 'gen' && <Generating req={view.req} onDone={onDone} onCancel={() => setView({ k: 'new', initial: { name: view.req.name, conditions: view.req.conditions } })} />}
         {view.k === 'trip' && <TripView tripId={view.id} onBack={() => setView({ k: 'trips' })} onRegenerate={(c, name) => setView({ k: 'new', initial: { name, conditions: c } })} />}
         {view.k === 'area' && <AreaPicker onBack={view.fromForm || draft ? () => setView({ k: 'new', initial: draft ?? undefined }) : undefined}
@@ -68,8 +68,8 @@ export default function App() {
         {view.k === 'settings' && <Settings />}
       </main>
       <nav className="tabs no-print">
-        {([['trips', '旅行'], ['area', '範囲'], ['settings', '設定']] as const).map(([k, l]) =>
-          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setView(k === 'area' ? { k: 'area', fromForm: view.k === 'new' } : ({ k } as View))}>{l}</button>)}
+        {([['trips', '旅行'], ['settings', '設定']] as const).map(([k, l]) =>
+          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setView({ k } as View)}>{l}</button>)}
       </nav>
     </div>
   )

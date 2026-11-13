@@ -40,6 +40,9 @@ export interface Conditions {
   end: string | null
   /** 現地の玄関口（到着駅・空港など）。初日はここから始まり、最終日はここで終わる */
   origin: Origin | null
+  /** 玄関口を行き先から自動で選んだか（手で選んだら false） */
+  originAuto?: boolean
+  originAutoFor?: string
   /** 自宅（往復の乗換案内リンク用） */
   home: string | null
   /** 時刻の基準：初日は「玄関口に着く」か「家を出る」か、最終日は「玄関口を出る」か「家に着く」か */
@@ -187,6 +190,9 @@ export interface Settings {
   defaultMode?: Mode | null
   defaultPace?: Pace | null
   defaultAdults?: number | null
+  /** いつもの家を出る・家に着く時刻（'HH:mm'） */
+  leaveTime?: string
+  returnTime?: string
 }
 
 export const emptyConditions = (): Conditions => ({

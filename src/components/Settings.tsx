@@ -47,6 +47,10 @@ export default function Settings() {
       <label>Claudeのモデル<input value={s.claudeModel} onChange={set('claudeModel')} /></label>
       <h2>いつもの条件（新しい旅行の初期値）</h2>
       <label>自宅（最寄り駅など）<input value={s.home ?? ''} onChange={e => { setS({ ...s, home: e.target.value }); setSaved(false) }} placeholder="例：中野駅" /></label>
+      <div className="grid2">
+        <label>いつもの家を出る時刻<input type="time" value={s.leaveTime ?? '07:00'} onChange={e => { setS({ ...s, leaveTime: e.target.value }); setSaved(false) }} /></label>
+        <label>いつもの家に着く時刻<input type="time" value={s.returnTime ?? '21:00'} onChange={e => { setS({ ...s, returnTime: e.target.value }); setSaved(false) }} /></label>
+      </div>
       <label className="check"><input type="checkbox" checked={s.homeTravelBasis ?? true} onChange={e => { setS({ ...s, homeTravelBasis: e.target.checked }); setSaved(false) }} />時刻は「家を出る・家に着く」で入れる</label>
       <label>いつもの移動手段
         <select value={s.defaultMode ?? ''} onChange={e => { setS({ ...s, defaultMode: (e.target.value || null) as S['defaultMode'] }); setSaved(false) }}>
@@ -75,7 +79,29 @@ export default function Settings() {
           </tbody>
         </table>
       )}
+      <Transfer current={s} onImport={async x => { await saveSettings(x); setS(x); setSaved(true) }} />
       <p className="credit"><a href="https://developers.rakuten.com/" target="_blank" rel="noreferrer">Supported by Rakuten Developers</a></p>
     </section>
   )
+}
+
+/** 設定（キー・いつもの条件）を別の端末に移す。文字列にして、移す先で貼り付ける */
+function Transfer({ current, onImport }: { current: S; onImport: (s: S) => void }) {
+  const [code, setCode] = useState('')
+  const [inp, setInp] = useState('')
+  const [msg, setMsg] = useState('')
+  const enc = (o: unknown) => 'tabi1:' + btoa(unescape(encodeURIComponent(JSON.stringify(o))))
+  const dec = (t: string) => JSON.parse(decodeURIComponent(escape(atob(t.trim().replace(/^tabi1:/, '')))))
+  return <div className="box">
+    <h3>設定を別の端末に移す</h3>
+    <p className="note">キーといつもの条件を1つの文字列にします。移す先の端末の「読み込む」に貼り付けてください。文字列にはAPIキーが入っているので、自分宛てのメモやメールなど、他人に見えない方法で送ってください。</p>
+    <div className="row wrap">
+      <button onClick={() => { setCode(enc(current)); setMsg('') }}>書き出す</button>
+      {code && <button onClick={async () => { try { await navigator.clipboard.writeText(code); setMsg('コピーしました') } catch { setMsg('コピーできませんでした。下の文字列を選んでコピーしてください') } }}>コピー</button>}
+    </div>
+    {code && <textarea readOnly value={code} rows={3} onFocus={e => e.target.select()} />}
+    <label>読み込む<textarea value={inp} onChange={e => setInp(e.target.value)} rows={3} placeholder="tabi1:… を貼り付け" /></label>
+    <button disabled={!inp.trim()} onClick={() => { try { const x = dec(inp) as S; if (typeof x !== 'object' || !('googleKey' in x)) throw new Error(); onImport({ ...current, ...x }); setInp(''); setMsg('読み込みました') } catch { setMsg('読み込めませんでした（文字列が途中で切れていないか確認してください）') } }}>読み込む</button>
+    {msg && <p className="note">{msg}</p>}
+  </div>
 }

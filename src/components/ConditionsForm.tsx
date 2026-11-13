@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import DestinationPicker from './DestinationPicker'
 import { deletePreset, getSettings, listAreas, listPresets, newId, savePreset } from '../db'
 import { gsiGeocode, placesLocate } from '../api/clients'
-import { distanceKm } from '../lib/geo'
+import { autoGateway, distanceKm } from '../lib/geo'
 import { PACE_LIMITS } from '../lib/schedule'
 import { emptyConditions, normalizeConditions, type Conditions, type MapArea, type Mode, type Pace, type Preset, type Priority, type Wish } from '../types'
 
@@ -14,7 +15,7 @@ interface OriginCand { title: string; sub: string; coord: { lat: number; lng: nu
 
 export interface StartRequest { name: string; conditions: Conditions; withEvents: boolean }
 
-export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { initial?: { name: string; conditions: Conditions; withEvents?: boolean }; onStart: (r: StartRequest) => void; goArea: () => void; onDraft?: (d: StartRequest) => void }) {
+export default function ConditionsForm({ initial, onStart, onDraft }: { initial?: { name: string; conditions: Conditions; withEvents?: boolean }; onStart: (r: StartRequest) => void; onDraft?: (d: StartRequest) => void }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [c, setC] = useState<Conditions>(initial ? normalizeConditions(initial.conditions) : emptyConditions())
   const [areas, setAreas] = useState<MapArea[]>([])
@@ -39,12 +40,37 @@ export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { 
       adults: x.adults ?? st.defaultAdults ?? null,
     })))
   }, [])
+  useEffect(() => { listAreas().then(setAreas) }, [c.areaIds.join(',')])
   useEffect(() => { listAreas().then(a => { setAreas(a); if (!c.areaIds.length && a.length === 1) setC(x => ({ ...x, areaIds: [a[0].id] })) }); listPresets().then(setPresets) }, [])
 
   const upd = (p: Partial<Conditions>) => setC(x => ({ ...x, ...p }))
   const str = (v: string) => (v.trim() ? v : null)
 
   const [originCands, setOriginCands] = useState<OriginCand[]>([])
+  const [gwEdit, setGwEdit] = useState(false)
+  const [timeDetail, setTimeDetail] = useState(false)
+  const [times, setTimes] = useState({ leave: '07:00', ret: '21:00', home: false })
+  useEffect(() => { getSettings().then(st => setTimes({ leave: st.leaveTime ?? '07:00', ret: st.returnTime ?? '21:00', home: !!st.home && (st.homeTravelBasis ?? true) })) }, [])
+
+  /** 日付だけ選べば、時刻はいつもの時刻（家を基準）か、家が未設定なら玄関口10時着・17時発にする */
+  function setDates(d1: string, d2: string) {
+    if (!d1) return
+    const end = d2 < d1 ? d1 : d2
+    const home = (c.startBasis ?? (times.home ? 'home' : 'gateway')) === 'home'
+    upd({
+      start: `${d1}T${c.start && timeDetail ? c.start.slice(11, 16) : home ? times.leave : '10:00'}`,
+      end: `${end}T${c.end && timeDetail ? c.end.slice(11, 16) : home ? times.ret : '17:00'}`,
+      startBasis: home ? 'home' : 'gateway', endBasis: home ? 'home' : 'gateway',
+    })
+  }
+
+  // 行き先が決まったら、玄関口（近くの駅）を自動で選ぶ。手で選んだ玄関口は変えない
+  useEffect(() => {
+    const first = areas.find(a => a.id === c.areaIds[0])
+    if (!first || (c.origin && !c.originAuto)) return
+    if (c.origin && c.originAuto && c.originAutoFor === first.id) return
+    getSettings().then(st => autoGateway(st, first)).then(o => { if (o) setC(x => ({ ...x, origin: o, originAuto: true, originAutoFor: first.id })) }).catch(() => {})
+  }, [c.areaIds.join(','), areas.length])
 
   async function findOrigin() {
     setOriginMsg(''); setOriginCands([])
@@ -70,7 +96,7 @@ export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { 
 
   function pickOrigin(x: OriginCand) {
     const area = areas.find(a => c.areaIds.includes(a.id))
-    upd({ origin: { label: x.title, coord: x.coord, source: x.source, placeId: x.placeId, fetchedAt: x.source === 'google' ? new Date().toISOString() : undefined } })
+    upd({ origin: { label: x.title, coord: x.coord, source: x.source, placeId: x.placeId, fetchedAt: x.source === 'google' ? new Date().toISOString() : undefined }, originAuto: false }); setGwEdit(false)
     setOriginCands([])
     const far = area && x.km! > area.radiusKm * 3 + 20
     setOriginMsg(`設定：${x.title}（範囲の中心から${x.km!.toFixed(1)}km）${far ? '　※範囲からかなり離れています。合っているか確認してください' : ''}`)
@@ -99,25 +125,26 @@ export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { 
       <label>旅行の名前<input value={name} onChange={e => setName(e.target.value)} placeholder="例：弘前 秋" /></label>
 
       <h2>場所</h2>
-      {areas.length === 0
-        ? <p className="note">範囲が未登録です。<button className="link" onClick={goArea}>地図で範囲を指定する</button></p>
-        : <>
-            <p className="note">回る範囲（複数選べます。範囲の間も選んだ移動手段で移動します）</p>
-            <div className="row wrap">{areas.map(a => <button key={a.id} className={`chipbtn ${c.areaIds.includes(a.id) ? 'on' : ''}`} onClick={() => upd({ areaIds: c.areaIds.includes(a.id) ? c.areaIds.filter(x => x !== a.id) : [...c.areaIds, a.id] })}>{a.name}（{a.radiusKm}km）</button>)}
-              <button className="link" onClick={goArea}>＋範囲を追加</button></div>
-          </>}
-      <label>自宅（往復の乗換案内に使います）<input value={c.home ?? ''} onChange={e => upd({ home: str(e.target.value), ...(c.startBasis ? {} : { startBasis: 'home', endBasis: 'home' }) })} placeholder="例：中野駅" /></label>
-      <label>現地の玄関口（初日に着き、最終日に出る駅・空港など）</label>
+      <DestinationPicker areaIds={c.areaIds} onChange={ids => upd({ areaIds: ids })} />
+      <label>自宅（往復の乗換案内に使います）<input value={c.home ?? ''} onChange={e => { const h = str(e.target.value); upd({ home: h, ...(h && !timeDetail && c.startBasis !== 'home' ? { startBasis: 'home', endBasis: 'home', ...(c.start ? { start: `${c.start.slice(0, 10)}T${times.leave}` } : {}), ...(c.end ? { end: `${c.end.slice(0, 10)}T${times.ret}` } : {}) } : {}) }) }} placeholder="例：中野駅" /></label>
+      {c.origin && !gwEdit
+        ? <p>玄関口：<b>{c.origin.label}</b>{c.originAuto && <span className="note">（行き先から自動で選びました）</span>} <button className="link small" onClick={() => setGwEdit(true)}>変える</button></p>
+        : <><label>現地の玄関口（初日に着き、最終日に出る駅・空港など）</label>
       <div className="row">
         <input value={originQ} onChange={e => setOriginQ(e.target.value)} placeholder="例：田沢湖駅、弘前市表町1-1" />
         <button onClick={findOrigin}>設定</button>
       </div>
       {originCands.length > 0 && <ul className="list">{originCands.map((x, i) => <li key={i}><button className="link" onClick={() => pickOrigin(x)}>{x.title}</button><span className="note">{x.sub}・中心から{x.km!.toFixed(1)}km</span></li>)}</ul>}
       {originCands.some(x => x.source === 'google') && <p className="note">候補の一部の情報：Google Maps</p>}
-      {originMsg && <p className="note">{originMsg}</p>}
+      {originMsg && <p className="note">{originMsg}</p>}</>}
 
       <h2>時間と移動</h2>
       <div className="grid2">
+        <label>出発日<input type="date" value={c.start?.slice(0, 10) ?? ''} onChange={e => setDates(e.target.value, c.end?.slice(0, 10) || e.target.value)} /></label>
+        <label>帰る日<input type="date" value={c.end?.slice(0, 10) ?? ''} onChange={e => setDates(c.start?.slice(0, 10) || e.target.value, e.target.value)} /></label>
+      </div>
+      {c.start && !timeDetail && <p className="note">{c.startBasis === 'home' ? `家を出る ${c.start.slice(11, 16)}` : `玄関口に着く ${c.start.slice(11, 16)}`}・{c.end ? (c.endBasis === 'home' ? `家に着く ${c.end.slice(11, 16)}` : `玄関口を出る ${c.end.slice(11, 16)}`) : ''}（いつもの時刻） <button className="link small" onClick={() => setTimeDetail(true)}>時刻を細かく指定</button></p>}
+      {(timeDetail || !c.start) && <><div className="grid2">
         <div>
           <div className="seg small">
             <button className={c.startBasis !== 'home' ? 'on' : ''} onClick={() => upd({ startBasis: 'gateway' })}>玄関口に着く</button>
@@ -134,7 +161,7 @@ export default function ConditionsForm({ initial, onStart, goArea, onDraft }: { 
         </div>
       </div>
       {(c.startBasis === 'home' || c.endBasis === 'home') && <label>家⇄玄関口の片道の所要時間（分）<input type="number" min={0} value={c.homeTravelMin ?? ''} onChange={e => upd({ homeTravelMin: e.target.value ? Number(e.target.value) : null, homeTravelEst: null })} placeholder="空欄なら目安を自動で調べます" /></label>}
-      <p className="note">往復の電車・飛行機の時刻はアプリでは推測しません。乗換案内で調べた時刻を入れてください（空欄なら初日は午前9時着・最終日は19時半発として組みます）。</p>
+      <p className="note">往復の電車・飛行機の時刻はアプリでは推測しません。家の時刻を基準にした場合、家⇄玄関口の所要時間は自動で目安を調べます。</p></>}
       <div className="seg">
         {([['train', '電車中心'], ['car', '車'], ['walk_transit', '徒歩＋公共交通']] as [Mode, string][]).map(([v, l]) =>
           <button key={v} className={c.mode === v ? 'on' : ''} onClick={() => upd({ mode: c.mode === v ? null : v })}>{l}</button>)}
