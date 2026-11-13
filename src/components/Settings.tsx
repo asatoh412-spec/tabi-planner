@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getSettings, saveSettings } from '../db'
+import { BUILD, hardUpdate } from '../lib/update'
 import type { Settings as S } from '../types'
 import { claudeMessage, gsiGeocode, placesTextSearch, rakutenVacant, routesCompute } from '../api/clients'
 
@@ -80,6 +81,11 @@ export default function Settings() {
         </table>
       )}
       <Transfer current={s} onImport={async x => { await saveSettings(x); setS(x); setSaved(true) }} />
+      <div className="box">
+        <h3>アプリの版</h3>
+        <p className="note">この端末の版：{BUILD.slice(0, 16).replace('T', ' ')}（UTC）。表示がおかしいときは下のボタンで更新してください。サイトのデータを消す必要はなく、キーや旅行は残ります。</p>
+        <button onClick={hardUpdate}>最新の版に更新する</button>
+      </div>
       <p className="credit"><a href="https://developers.rakuten.com/" target="_blank" rel="noreferrer">Supported by Rakuten Developers</a></p>
     </section>
   )

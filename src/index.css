@@ -213,3 +213,6 @@ details.notices.warn summary { color: #8a6d1d; }
 @media (prefers-color-scheme: dark) { details.notices.warn summary { color: #e0c463; } }
 .dest { flex-wrap: nowrap !important; }
 .dest .radius { overflow-x: auto; flex-wrap: nowrap; }
+.update-bar { background: var(--accent); color: var(--accent-ink); text-align: center; font-size: 14px; padding: 6px; display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.update-bar button { padding: 4px 10px; font-size: 13px; }
+.update-bar .note { color: inherit; opacity: .85; }

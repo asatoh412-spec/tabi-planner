@@ -6,6 +6,7 @@ import Settings from './components/Settings'
 import TripView from './components/TripView'
 import { deleteTrip, listAreas, listTrips, purgeExpiredGoogleCoords } from './db'
 import TripCard from './components/TripCard'
+import { BUILD, hardUpdate, latestBuild } from './lib/update'
 import type { Conditions, MapArea, Trip } from './types'
 
 type View =
@@ -39,6 +40,15 @@ export default function App() {
   const [draft, setDraftState] = useState<StartRequest | null>(() => { try { const t = localStorage.getItem('tabi-draft'); return t ? JSON.parse(t) : null } catch { return null } })
   const setDraft = useCallback((d: StartRequest | null) => { setDraftState(d); try { if (d) localStorage.setItem('tabi-draft', JSON.stringify(d)); else localStorage.removeItem('tabi-draft') } catch { /* 保存できなくても続行 */ } }, [])
   const [online, setOnline] = useState(navigator.onLine)
+  const [newer, setNewer] = useState(false)
+  // 新しい版が公開されていれば知らせる（起動時と、画面に戻ってきたとき）
+  useEffect(() => {
+    const check = () => latestBuild().then(b => setNewer(!!b && b !== BUILD))
+    check()
+    const onVis = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
   useEffect(() => {
     purgeExpiredGoogleCoords()
     // 以前のPWA版が残した Service Worker とキャッシュを消す（古い版が表示され続けるのを防ぐ）
@@ -52,6 +62,7 @@ export default function App() {
   const tab = view.k === 'new' || view.k === 'gen' || view.k === 'trip' ? 'trips' : view.k
   return (
     <div className="app">
+      {newer && <div className="update-bar no-print">新しい版があります <button onClick={hardUpdate}>更新する</button><span className="note">（キーや旅行は消えません）</span></div>}
       {!online && <div className="offline no-print">オフラインです（このアプリはオンラインで使います）</div>}
       <main>
         {view.k === 'trips' && <Trips open={id => setView({ k: 'trip', id })} create={() => { setDraft(null); setView({ k: 'new', initial: undefined }) }} draft={draft} resume={() => setView({ k: 'new', initial: draft ?? undefined })} />}
