@@ -55,6 +55,8 @@ export interface Conditions {
   /** 推定の根拠（ウェブ検索の出典URL、または「車の経路」） */
   homeTravelSource?: string | null
   mode: Mode | null
+  /** 飛行機も使う（家から遠い行き先なら空港を玄関口にする） */
+  plane?: boolean
   pace: Pace | null
   /** 旧形式（1か所）。読み込み時に areaIds へ移す */
   areaId?: string | null
@@ -188,6 +190,7 @@ export interface Settings {
   home?: string
   homeTravelBasis?: boolean
   defaultMode?: Mode | null
+  defaultPlane?: boolean
   defaultPace?: Pace | null
   defaultAdults?: number | null
   /** いつもの家を出る・家に着く時刻（'HH:mm'） */

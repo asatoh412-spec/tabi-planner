@@ -29,10 +29,17 @@ export class CostMeter {
 export interface CandidatePool { all: Candidate[]; wishPlace: Record<string, Candidate | undefined> }
 
 export async function gatherCandidates(s: Settings, c: Conditions, areas: MapArea[], meter: CostMeter, progress: Progress): Promise<CandidatePool> {
+  // 玄関口が行き先から遠すぎる（範囲の外の同名の駅を選んだなど）なら、費用をかける前に止める
+  if (c.origin && validCoord(c.origin.coord) && areas.length) {
+    const km = Math.min(...areas.map(a => distanceKm(c.origin!.coord, a.center)))
+    if (km > 100) throw new Error(`玄関口「${c.origin.label}」が行き先から約${Math.round(km)}km離れています。条件の「行き先」で玄関口を選び直してください`)
+  }
   const pool = new Map<string, Candidate>()
   const wishPlace: Record<string, Candidate | undefined> = {}
   const add = (cs: Candidate[]) => cs.forEach(x => { pool.set(x.id, x); remember(x) })
-  const q = async (a: MapArea, text: string, max: number) => { meter.places++; return placesCandidates(s, text, a.center, a.radiusKm * 1000, max) }
+  // Placesの範囲指定は「優先」なだけで、範囲の外の同名の場所も返る。範囲から大きく外れたものは捨てる
+  const inside = (a: MapArea, x: Candidate) => distanceKm(x.location, a.center) <= Math.max(a.radiusKm * 1.5, a.radiusKm + 5)
+  const q = async (a: MapArea, text: string, max: number) => { meter.places++; return (await placesCandidates(s, text, a.center, a.radiusKm * 1000, max)).filter(x => inside(a, x)) }
   const main = areas[0]
 
   // 必須・できれば：どの範囲にあるか分からないので、範囲ごとに探して一番近いものを採る

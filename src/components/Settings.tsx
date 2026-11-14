@@ -57,6 +57,7 @@ export default function Settings() {
         <select value={s.defaultMode ?? ''} onChange={e => { setS({ ...s, defaultMode: (e.target.value || null) as S['defaultMode'] }); setSaved(false) }}>
           <option value="">おまかせ</option><option value="train">電車中心</option><option value="car">車</option><option value="walk_transit">徒歩＋公共交通</option>
         </select></label>
+      <label className="check"><input type="checkbox" checked={!!s.defaultPlane} onChange={e => { setS({ ...s, defaultPlane: e.target.checked }); setSaved(false) }} />遠い行き先では飛行機も使う</label>
       <label>いつものペース
         <select value={s.defaultPace ?? ''} onChange={e => { setS({ ...s, defaultPace: (e.target.value || null) as S['defaultPace'] }); setSaved(false) }}>
           <option value="">おまかせ</option><option value="relaxed">ゆったり</option><option value="standard">標準</option><option value="packed">詰め込み</option>

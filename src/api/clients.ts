@@ -129,6 +129,22 @@ export async function placesCandidates(s: Settings, query: string, center: LatLn
 }
 
 /** 駅名・施設名で地点を探す（出発地点用。Pro料金：月5,000件まで無料） */
+/** 範囲の中だけを探す（locationBias と違い、範囲の外の同名の場所は返らない）。玄関口の自動選択に使う */
+export async function placesWithin(s: Settings, query: string, center: LatLng, radiusKm: number, includedType?: string) {
+  const dLat = radiusKm / 111, dLng = radiusKm / (111 * Math.cos(center.lat * Math.PI / 180))
+  const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': s.googleKey, 'X-Goog-FieldMask': 'places.id,places.displayName,places.location,places.formattedAddress,places.types' },
+    body: JSON.stringify({
+      textQuery: query, languageCode: 'ja', regionCode: 'JP', pageSize: 10,
+      ...(includedType ? { includedType, strictTypeFiltering: true } : {}),
+      locationRestriction: { rectangle: { low: { latitude: center.lat - dLat, longitude: center.lng - dLng }, high: { latitude: center.lat + dLat, longitude: center.lng + dLng } } },
+    }),
+  })
+  const j = await r.json()
+  if (!r.ok) throw new Error(`Places HTTP ${r.status}: ${j?.error?.message ?? ''}`)
+  return ((j.places ?? []) as RawPlace[]).map(toCandidate)
+}
 export async function placesLocate(s: Settings, query: string, center: LatLng, radiusM: number) {
   const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',

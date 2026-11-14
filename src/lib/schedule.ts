@@ -113,6 +113,9 @@ export function validatePlan(c: Conditions, plan: Plan, missed: { dayIndex: numb
       const what = d.lodging ? `宿に着くのが${CHECKIN_BY}（または終了予定）より` : `終了予定${d.endTime}を`
       issues.push({ dayIndex: i, kind: 'over_time', text: `${i + 1}日目：${what}${-d.slackMinutes}分遅い` })
     }
+    // 1日の中の移動が3時間を超える区間は、範囲が離れすぎ（別の日・別の玄関口にすべき）
+    const longLegs = [...d.legs, d.lodgingLeg, d.returnLeg].filter((l): l is Leg => !!l && l.minutes > 180)
+    if (longLegs.length) issues.push({ dayIndex: i, kind: 'over_time', text: `${i + 1}日目：1回の移動が${Math.max(...longLegs.map(l => l.minutes))}分かかる区間がある（場所が離れすぎ。同じ日は近い場所でまとめる）` })
     const visits = d.stops.filter(s => s.kind !== 'meal').length
     if (visits > pace.stops) issues.push({ dayIndex: i, kind: 'pace_count', text: `${i + 1}日目：立ち寄り${visits}か所（${pace.label}の上限${pace.stops}）` })
     if (d.walkMeters / 1000 > pace.walkKm) issues.push({ dayIndex: i, kind: 'pace_walk', text: `${i + 1}日目：歩行${(d.walkMeters / 1000).toFixed(1)}km（${pace.label}の上限${pace.walkKm}km）` })
@@ -163,6 +166,8 @@ export async function scheduleAndValidate(s: Settings, c: Conditions, plan: Plan
 /** 推定の時刻は15分単位に丸めて「頃」を付ける */
 export function showTime(hhmm: string | undefined, approx?: boolean) {
   if (!hhmm) return ''
+  const raw = toMin(hhmm)
+  if (raw >= 24 * 60) return `翌${fromMin(raw - 24 * 60)}${approx ? '頃' : ''}`
   if (!approx) return hhmm
   const m = Math.round(toMin(hhmm) / 15) * 15
   return `${fromMin(m)}頃`

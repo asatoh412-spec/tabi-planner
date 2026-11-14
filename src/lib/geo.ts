@@ -1,4 +1,4 @@
-import { claudeJSON, gsiGeocode, placeDetails, placesLocate, routeBetween, type ClaudeUsage } from '../api/clients'
+import { claudeJSON, gsiGeocode, placeDetails, placesLocate, placesWithin, routeBetween, type ClaudeUsage } from '../api/clients'
 import type { Conditions, LatLng, Settings } from '../types'
 
 export function distanceKm(a: LatLng, b: LatLng) {
@@ -76,11 +76,39 @@ function toMinutes(v: unknown): number | undefined {
 }
 
 /** 行き先（最初の範囲）の近くの駅を、玄関口として自動で選ぶ */
-export async function autoGateway(s: Settings, area: { name: string; center: LatLng }) {
+/**
+ * 行き先から玄関口（到着駅・空港）を自動で選ぶ。
+ * 以前は「範囲の名前＋駅」で探して、範囲の外の同名の駅（鹿児島市吉野町 → 横浜の吉野町駅）を選んでいた（2026-11-14 の不具合）。
+ * いまは範囲の中だけを探す（locationRestriction）。
+ * 家から遠い（250km超）ときは、近くの小さな駅ではなく、新幹線の駅（または飛行機を使うなら空港）を玄関口にする。
+ */
+export async function autoGateway(s: Settings, area: { name: string; center: LatLng; radiusKm?: number }, opt: { home?: string | null; plane?: boolean; onUsage?: (u: ClaudeUsage) => void } = {}) {
   if (!s.googleKey) return null
-  const cs = await placesLocate(s, `${area.name} 駅`, area.center, 15000)
-  const st = cs.filter(x => x.name.endsWith('駅'))
-  const pick = (st.length ? st : cs).sort((a, b) => distanceKm(a.location, area.center) - distanceKm(b.location, area.center))[0]
+  const near = async (q: string, km: number, type: string) =>
+    (await placesWithin(s, q, area.center, km, type || undefined).catch(() => [])).sort((a, b) => distanceKm(a.location, area.center) - distanceKm(b.location, area.center))
+  let homeKm = 0
+  if (opt.home) {
+    const h = (await placesLocate(s, opt.home, { lat: 35.68, lng: 139.77 }, 50000).catch(() => []))[0]?.location
+    if (h) homeKm = distanceKm(h, area.center)
+  }
+  let pick: Awaited<ReturnType<typeof near>>[number] | undefined
+  if (homeKm > 250) {
+    // 遠い行き先：どの駅・空港に着くのが一般的かは、観光協会などの「アクセス」をウェブ検索して決める（記憶で決めない）
+    if (s.anthropicKey && opt.home) {
+      try {
+        const res = await claudeJSON<{ name?: string; sourceUrl?: string }>(s,
+          'ウェブ検索で調べた事実だけを使う。記憶から決めない。',
+          `「${opt.home}」から「${area.name}」（緯度${area.center.lat.toFixed(3)}、経度${area.center.lng.toFixed(3)}付近）へ、${opt.plane ? '飛行機または新幹線・特急' : '鉄道（新幹線・特急。飛行機は使わない）'}で行くとき、一般的に降りる現地の玄関口（駅${opt.plane ? 'または空港' : ''}）を、観光協会・自治体の「アクセス」のページなどで調べ、report_gateway で報告してください。そこから先のバスやローカル線は含めず、遠くから来た人が降りる大きな駅${opt.plane ? '・空港' : ''}を1つ選びます。`,
+          { maxSearches: 3, maxTokens: 3000, tool: { name: 'report_gateway', description: '玄関口を報告する', input_schema: { type: 'object', required: ['name', 'sourceUrl'], properties: { name: { type: 'string', description: '駅名または空港名（例：〇〇駅、〇〇空港）' }, sourceUrl: { type: 'string' } } } } })
+        opt.onUsage?.(res.usage)
+        const n = res.data.name?.trim()
+        if (n && res.data.sourceUrl) pick = (await near(n, 90, n.includes('空港') ? 'airport' : 'train_station'))[0] ?? (await near(n, 90, ''))[0]
+      } catch { /* 下の検索に任せる */ }
+    }
+    if (!pick && opt.plane && homeKm > 500) pick = (await near('空港', 90, 'airport')).find(x => x.name.includes('空港'))
+    if (!pick) pick = (await near('新幹線 駅', 90, 'train_station')).find(x => x.name.endsWith('駅'))
+  }
+  if (!pick) pick = (await near('駅', Math.max(10, (area.radiusKm ?? 5) + 5), 'train_station')).find(x => x.name.endsWith('駅'))
   if (!pick) return null
   return { label: pick.name, coord: pick.location, source: 'google' as const, placeId: pick.id, fetchedAt: new Date().toISOString() }
 }

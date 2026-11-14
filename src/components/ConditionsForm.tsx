@@ -36,6 +36,7 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
       startBasis: x.startBasis ?? (st.home && (st.homeTravelBasis ?? true) ? 'home' : 'gateway'),
       endBasis: x.endBasis ?? (st.home && (st.homeTravelBasis ?? true) ? 'home' : 'gateway'),
       mode: x.mode ?? st.defaultMode ?? null,
+      plane: x.plane ?? st.defaultPlane ?? false,
       pace: x.pace ?? st.defaultPace ?? null,
       adults: x.adults ?? st.defaultAdults ?? null,
     })))
@@ -47,6 +48,7 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
   const str = (v: string) => (v.trim() ? v : null)
 
   const [originCands, setOriginCands] = useState<OriginCand[]>([])
+  const [gwBusy, setGwBusy] = useState(false)
   const [gwEdit, setGwEdit] = useState(false)
   const [homeEdit, setHomeEdit] = useState(false)
   const [step, setStep] = useState(initial?.conditions.areaIds?.length ? 3 : 0)
@@ -70,9 +72,13 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
   useEffect(() => {
     const first = areas.find(a => a.id === c.areaIds[0])
     if (!first || (c.origin && !c.originAuto)) return
-    if (c.origin && c.originAuto && c.originAutoFor === first.id) return
-    getSettings().then(st => autoGateway(st, first)).then(o => { if (o) setC(x => ({ ...x, origin: o, originAuto: true, originAutoFor: first.id })) }).catch(() => {})
-  }, [c.areaIds.join(','), areas.length])
+    const key = `${first.id}|${c.home ?? ''}|${c.plane ? 1 : 0}`
+    if (c.origin && c.originAuto && c.originAutoFor === key) return
+    let stale = false
+    setGwBusy(true)
+    const timer = setTimeout(() => getSettings().then(st => autoGateway(st, first, { home: c.home ?? st.home, plane: !!c.plane })).then(o => { if (!stale && o) setC(x => ({ ...x, ...(x.origin?.placeId !== o.placeId ? { homeTravelEst: null, homeTravelSource: null } : {}), origin: o, originAuto: true, originAutoFor: key })) }).catch(() => {}).finally(() => { if (!stale) setGwBusy(false) }), 1200)
+    return () => { stale = true; clearTimeout(timer); setGwBusy(false) }
+  }, [c.areaIds.join(','), areas.length, c.home, c.plane])
 
   async function findOrigin() {
     setOriginMsg(''); setOriginCands([])
@@ -98,7 +104,7 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
 
   function pickOrigin(x: OriginCand) {
     const area = areas.find(a => c.areaIds.includes(a.id))
-    upd({ origin: { label: x.title, coord: x.coord, source: x.source, placeId: x.placeId, fetchedAt: x.source === 'google' ? new Date().toISOString() : undefined }, originAuto: false }); setGwEdit(false)
+    upd({ origin: { label: x.title, coord: x.coord, source: x.source, placeId: x.placeId, fetchedAt: x.source === 'google' ? new Date().toISOString() : undefined }, originAuto: false, homeTravelEst: null, homeTravelSource: null }); setGwEdit(false)
     setOriginCands([])
     const far = area && x.km! > area.radiusKm * 3 + 20
     setOriginMsg(`設定：${x.title}（範囲の中心から${x.km!.toFixed(1)}km）${far ? '　※範囲からかなり離れています。合っているか確認してください' : ''}`)
@@ -132,7 +138,7 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
 
         <DestinationPicker areaIds={c.areaIds} onChange={ids => upd({ areaIds: ids })} />
       {c.origin && !gwEdit
-        ? <p>玄関口：<b>{c.origin.label}</b>{c.originAuto && <span className="note">（行き先から自動で選びました）</span>} <button className="link small" onClick={() => setGwEdit(true)}>変える</button></p>
+        ? <p>玄関口：<b>{c.origin.label}</b>{gwBusy ? <span className="note">（選び直しています…）</span> : c.originAuto && <span className="note">（行き先から自動で選びました）</span>} <button className="link small" onClick={() => setGwEdit(true)}>変える</button></p>
         : <><label>現地の玄関口（初日に着き、最終日に出る駅・空港など）</label>
       <div className="row">
         <input value={originQ} onChange={e => setOriginQ(e.target.value)} placeholder="例：田沢湖駅、弘前市表町1-1" />
@@ -175,6 +181,7 @@ export default function ConditionsForm({ initial, onStart, onDraft }: { initial?
         {([['train', '電車中心'], ['car', '車'], ['walk_transit', '徒歩＋公共交通']] as [Mode, string][]).map(([v, l]) =>
           <button key={v} className={c.mode === v ? 'on' : ''} onClick={() => upd({ mode: c.mode === v ? null : v })}>{l}</button>)}
       </div>
+      {c.mode !== 'car' && <label className="check"><input type="checkbox" checked={!!c.plane} onChange={e => upd({ plane: e.target.checked, homeTravelEst: null })} />行き帰りに飛行機も使う（家から遠い行き先なら空港を玄関口にします）</label>}
       <div className="seg">
         {(Object.keys(PACE_LIMITS) as Pace[]).map(p =>
           <button key={p} className={c.pace === p ? 'on' : ''} onClick={() => upd({ pace: c.pace === p ? null : p })}>{PACE_LIMITS[p].label}<small>{PACE_LIMITS[p].stops}か所・{PACE_LIMITS[p].walkKm}km</small></button>)}
